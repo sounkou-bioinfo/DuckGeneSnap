@@ -15,49 +15,19 @@ server.
 > advice. Clinically significant findings require clinical-grade
 > confirmation and review by a qualified professional.
 
-## What works now
+## Features
 
-- Static `index.html` with local browser-side analysis.
-- 23andMe-style raw text upload.
-- VCF/BCF/VCF.GZ upload through
-  `Rduckhts::rduckhts_bcf(..., tidy_format = TRUE)`, including
-  DeepVariant-style `FORMAT_GT` genotype fields. VCF/BCF analysis
-  reports called alternate records and skips hom-ref/no-call genotypes
-  such as `0/0` and `./.`.
-- Locus-first matching:
-  `build + normalized chromosome + 1-based position`.
-- Sorted ZSTD Parquet annotation assets staged into webR and queried
-  with DuckDB.
-- Configurable Parquet row group size and compression level.
-- Auxiliary `variant_keys` table for allele-aware display, QA, and
-  future exact-key refinement.
-- Separate advanced VCF/BCF liftover helper using `bcftools_liftover()`:
-  users upload the VCF/BCF plus chain/source FASTA/destination FASTA
-  assets there, download lifted TSV/Parquet output, then upload the
-  converted file for annotation.
-- DuckBedQC-style step timing modal and per-run timing table.
-- Searchable, paged, scrollable result tables backed by browser DuckDB,
-  with column filters, ClinVar review-status stars, plus TSV, CSV, Excel
-  `.xlsx`, and Parquet exports near the result table. Summary cards
-  remain global for the analysis run; filters only change the current
-  table page.
-- VCF/gVCF record filtering defaults to called alternate variants only,
-  which skips gVCF reference blocks, symbolic alleles, hom-ref
-  genotypes, and no-calls. VCF/BCF annotation matches require an exact
-  allele `variant_key` match when an annotation has REF/ALT alleles, so
-  same-locus different-allele calls are not reported as hits.
-- Collapsed HTMX-loaded advanced helper workflows, including VCF/BCF
-  liftover conversion and 23andMe-to-VCF guidance. LitVar2 lookup
-  links/API attempts live in each variant detail panel instead of a
-  separate global lookup tool.
-- Small synthetic chip/VCF/BCF inputs live under `public/demo/`; they
-  are test inputs, not the annotation source.
+DuckGeneSnap accepts 23andMe-style text and VCF/BCF/VCF.GZ files, runs
+all work locally in the browser, and queries shipped Parquet assets with
+DuckDB. The assets include ClinVar variant-summary rows for GRCh37 and
+GRCh38, GWAS Catalog associations, and a small seed table for
+examples/tests.
 
-The committed annotation assets are real data: ClinVar variant-summary
-rows for GRCh37 and GRCh38, plus GWAS Catalog associations filtered at
-genome-wide significance. A small manually curated GRCh37 seed table is
-included only for smoke tests/examples and is not the main annotation
-set.
+VCF/BCF inputs are filtered to called alternate records and matched by
+exact `variant_key` when REF/ALT alleles are available. Results are
+searchable, paged, and exportable as TSV, CSV, Excel, or Parquet.
+Advanced local helpers cover VCF/BCF liftover and chip-to-VCF
+cleanup/harmonization.
 
 ## Hosted site
 
