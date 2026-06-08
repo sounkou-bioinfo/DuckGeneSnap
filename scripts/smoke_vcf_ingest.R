@@ -59,6 +59,7 @@ WITH source_rows AS (
     AND alt IS NOT NULL
     AND regexp_matches(upper(ref), '^[ACGT]+$')
     AND regexp_matches(upper(alt), '^[ACGT]+$')
+    AND coalesce(regexp_matches(gt, '(^|[/|])([1-9][0-9]*)([/|]|$)'), false)
 ), gt_parts AS (
   SELECT
     *,
@@ -118,7 +119,7 @@ SELECT
   (SELECT count(*) FROM user_variant_keyed)::BIGINT AS keyed_records,
   (SELECT count(*) FROM analysis_matches)::BIGINT AS matched_records
 ")
-stopifnot(counts$raw_records == 4L)
+stopifnot(counts$raw_records == 6L)
 stopifnot(counts$keyed_records == 2L)
 stopifnot(counts$matched_records >= 2L)
 cat("DeepVariant-style VCF.GZ smoke test passed\n")

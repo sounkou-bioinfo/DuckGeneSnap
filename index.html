@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
   <style>
     body { background: #f8fafc; }
@@ -58,7 +59,10 @@
             <div class="mb-3">
               <label for="file-input" class="form-label fw-semibold">Input file</label>
               <input class="form-control form-control-lg" type="file" id="file-input" accept=".txt,.tsv,.vcf,.bcf,.gz" />
-              <div class="form-text">Your file is read by your browser and staged into webR's in-memory filesystem. It is not uploaded to a server.</div>
+              <div class="form-text">
+                Your file is read by your browser and staged into webR's in-memory filesystem. It is not uploaded to a server.
+                VCF/BCF is preferred; 23andMe text support is a convenience path, and users who need allele-aware calls should convert chip files to VCF with trusted local build metadata.
+              </div>
             </div>
 
             <div class="row g-3 mb-3">
@@ -96,7 +100,6 @@
                 <button id="analyze-button" type="button" class="btn btn-primary btn-lg">Analyze locally</button>
                 <button id="demo-button" type="button" class="btn btn-outline-dark btn-lg">Load demo 23andMe</button>
                 <button id="reset-button" type="button" class="btn btn-outline-secondary btn-lg">Reset</button>
-                <button id="download-button" type="button" class="btn btn-outline-success btn-lg" disabled>Download TSV</button>
               </div>
             </div>
           </div>
@@ -131,30 +134,9 @@
           </div>
         </div>
 
-        <div class="card mt-4" id="liftover-card" hidden>
-          <div class="card-body">
-            <h3 class="h5">Advanced VCF/BCF liftover assets</h3>
-            <p class="text-muted small mb-3">
-              If the uploaded VCF/BCF build differs from the analysis bundle, DuckGeneSnap can call
-              <code>bcftools_liftover()</code> in Rduckhts. Provide a chain file plus source and destination FASTA files.
-              These files remain local in the browser VFS. For 23andMe files, matching remains build/chrom/position based.
-            </p>
-            <div class="row g-3">
-              <div class="col-lg-4">
-                <label class="form-label" for="chain-file">Chain file</label>
-                <input class="form-control" id="chain-file" type="file" accept=".chain,.gz" />
-              </div>
-              <div class="col-lg-4">
-                <label class="form-label" for="src-ref-file">Source FASTA</label>
-                <input class="form-control" id="src-ref-file" type="file" accept=".fa,.fasta,.fna,.gz" />
-              </div>
-              <div class="col-lg-4">
-                <label class="form-label" for="dst-ref-file">Destination FASTA</label>
-                <input class="form-control" id="dst-ref-file" type="file" accept=".fa,.fasta,.fna,.gz" />
-              </div>
-            </div>
-          </div>
-        </div>
+        <section class="card mt-4" id="advanced-tools" hx-get="public/fragments/advanced_tools.html" hx-trigger="load" hx-swap="innerHTML">
+          <div class="card-body text-muted small">Loading advanced local tools...</div>
+        </section>
       </div>
     </section>
 

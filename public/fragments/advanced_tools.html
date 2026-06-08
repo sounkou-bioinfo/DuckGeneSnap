@@ -1,0 +1,72 @@
+<div class="card-body">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+    <div>
+      <h2 class="h5 mb-1">Advanced local tools</h2>
+      <p class="text-muted small mb-0">
+        These are separate helper workflows from the main annotation run. Files and URL downloads are staged only inside the browser webR filesystem.
+      </p>
+    </div>
+    <span class="badge text-bg-light">HTMX fragment</span>
+  </div>
+
+  <ul class="nav nav-tabs" id="advanced-tools-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="liftover-tool-tab" data-bs-toggle="tab" data-bs-target="#liftover-tool-pane" type="button" role="tab">
+        VCF/BCF liftover assets
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="chip-vcf-tool-tab" data-bs-toggle="tab" data-bs-target="#chip-vcf-tool-pane" type="button" role="tab">
+        23andMe to VCF guidance
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content border border-top-0 p-3 bg-white">
+    <div class="tab-pane fade show active" id="liftover-tool-pane" role="tabpanel" aria-labelledby="liftover-tool-tab">
+      <h3 class="h6">VCF/BCF liftover inputs</h3>
+      <p class="text-muted small mb-3">
+        If the uploaded VCF/BCF build differs from the analysis bundle, DuckGeneSnap can call
+        <code>bcftools_liftover()</code> in Rduckhts. Provide a chain file plus source and destination FASTA files,
+        either as local files or HTTPS URLs that allow browser CORS downloads.
+      </p>
+      <div class="row g-3">
+        <div class="col-lg-4">
+          <label class="form-label" for="chain-file">Chain file</label>
+          <input class="form-control mb-2" id="chain-file" type="file" accept=".chain,.gz" />
+          <input class="form-control" id="chain-url" type="url" placeholder="https://.../hg19ToHg38.over.chain.gz" />
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="src-ref-file">Source FASTA</label>
+          <input class="form-control mb-2" id="src-ref-file" type="file" accept=".fa,.fasta,.fna,.gz" />
+          <input class="form-control" id="src-ref-url" type="url" placeholder="https://.../source.fa.gz" />
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="dst-ref-file">Destination FASTA</label>
+          <input class="form-control mb-2" id="dst-ref-file" type="file" accept=".fa,.fasta,.fna,.gz" />
+          <input class="form-control" id="dst-ref-url" type="url" placeholder="https://.../destination.fa.gz" />
+        </div>
+      </div>
+      <p class="small text-muted mt-3 mb-0">
+        UCSC chain files are commonly available under
+        <a href="https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/" target="_blank" rel="noopener">hg19 liftOver</a>
+        and
+        <a href="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/" target="_blank" rel="noopener">hg38 liftOver</a>.
+        Use the same source FASTA used to call the VCF and the matching destination reference; whole-genome FASTA URLs can be large and may fail if the host blocks CORS.
+      </p>
+    </div>
+
+    <div class="tab-pane fade" id="chip-vcf-tool-pane" role="tabpanel" aria-labelledby="chip-vcf-tool-tab">
+      <h3 class="h6">Why convert chip text to VCF?</h3>
+      <p class="small text-muted">
+        23andMe-style text files usually carry rsID, chromosome, position, and genotype, but not a full REF/ALT representation.
+        Direct text matching is useful for quick locus checks. For allele-aware interpretation, convert chip data to VCF with the correct genome build, reference FASTA, and chip manifest before using DuckGeneSnap.
+      </p>
+      <ul class="small text-muted mb-0">
+        <li>Keep build metadata explicit: GRCh37 and GRCh38 positions are not interchangeable.</li>
+        <li>Use a trusted local converter or pipeline that records REF/ALT and preserves no-calls.</li>
+        <li>Then upload the VCF/BCF here so DuckGeneSnap can filter called alternate genotypes and compute VariantKeys.</li>
+      </ul>
+    </div>
+  </div>
+</div>

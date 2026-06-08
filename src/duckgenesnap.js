@@ -19,6 +19,7 @@ const state = {
   },
   lastRows: [],
   lastSummary: null,
+  currentSearch: "",
   timings: [],
   operation: {
     modal: null,
@@ -32,13 +33,17 @@ const riskOrder = {
   high_risk: 0,
   increased_risk: 1,
   carrier: 2,
-  normal: 3,
+  drug_response: 3,
+  annotation_match: 4,
+  normal: 5,
 };
 
 const riskClasses = {
   high_risk: "danger",
   increased_risk: "warning",
   carrier: "info",
+  drug_response: "primary",
+  annotation_match: "secondary",
   normal: "success",
 };
 
@@ -56,15 +61,16 @@ function initNodes() {
     "analysis-build",
     "liftover-mode",
     "chain-file",
+    "chain-url",
     "src-ref-file",
+    "src-ref-url",
     "dst-ref-file",
+    "dst-ref-url",
     "analyze-button",
     "demo-button",
     "reset-button",
-    "download-button",
     "results",
     "messages",
-    "liftover-card",
     "timing-card",
     "timing-list",
     "operation-modal",
@@ -487,7 +493,28 @@ FROM read_csv_auto('${path}', delim='\t', header=true)
 }
 
 function buildRiskOrderSql(alias = "risk_level") {
-  return `CASE ${alias} WHEN 'high_risk' THEN 0 WHEN 'increased_risk' THEN 1 WHEN 'carrier' THEN 2 WHEN 'normal' THEN 3 ELSE 9 END`;
+  return `CASE ${alias} WHEN 'high_risk' THEN 0 WHEN 'increased_risk' THEN 1 WHEN 'carrier' THEN 2 WHEN 'drug_response' THEN 3 WHEN 'annotation_match' THEN 4 WHEN 'normal' THEN 5 ELSE 9 END`;
+}
+
+function annotationRiskSql() {
+  return `coalesce(gi.risk_level, CASE
+    WHEN a.significance = 'pathogenic' THEN 'high_risk'
+    WHEN a.significance = 'likely_pathogenic' THEN 'increased_risk'
+    WHEN a.significance = 'drug_response' THEN 'drug_response'
+    WHEN a.significance = 'risk_factor' THEN 'increased_risk'
+    ELSE 'annotation_match'
+  END)`;
+}
+
+function annotationInterpretationSql() {
+  return `coalesce(gi.interpretation, CASE
+    WHEN a.significance IN ('pathogenic', 'likely_pathogenic') THEN
+      'Input genotype matched a ClinVar pathogenicity locus. This is not medical advice; confirm with clinical-grade testing.'
+    WHEN a.significance = 'drug_response' THEN
+      'Input genotype matched a ClinVar drug-response locus. Discuss medication relevance with a qualified clinician or pharmacist.'
+    ELSE
+      'Input genotype matched this annotation locus. No genotype-specific interpretation is available.'
+  END)`;
 }
 
 async function analyze23AndMe(file, analysisBuild) {
@@ -531,8 +558,8 @@ SELECT
   a.clinvar_stars,
   a.odds_ratio,
   a.score,
-  coalesce(gi.risk_level, 'normal') AS risk_level,
-  coalesce(gi.interpretation, 'No genotype-specific interpretation is available for this genotype.') AS interpretation
+  ${annotationRiskSql()} AS risk_level,
+  ${annotationInterpretationSql()} AS interpretation
 FROM user_snps s
 JOIN variant_annotations a
   ON a.build = ${sqlString(analysisBuild)}
@@ -544,7 +571,7 @@ LEFT JOIN genotype_interpretations gi
 LEFT JOIN variant_keys vk
   ON vk.annotation_id = a.annotation_id
  AND vk.is_primary_key
-ORDER BY ${buildRiskOrderSql("coalesce(gi.risk_level, 'normal')")}, a.score DESC, a.gene, a.annotation_id
+ORDER BY ${buildRiskOrderSql(annotationRiskSql())}, a.score DESC, a.gene, a.annotation_id
 `);
   });
   return { stats, inputKind: "23andMe" };
@@ -564,15 +591,39 @@ async function writeBrowserFile(file, vfsPath) {
 }
 
 function selectedOptionalFile(id) {
-  const input = nodes[id];
+  const input = byId(id) || nodes[id];
   return input?.files?.[0] || null;
 }
 
-async function stageLiftoverFile(inputId, targetName) {
+async function stageLiftoverAsset(inputId, urlId, targetName) {
   const file = selectedOptionalFile(inputId);
-  if (!file) return null;
-  const path = `${VFS_UPLOAD}/${targetName}_${sanitizeFilename(file.name)}`;
-  await writeBrowserFile(file, path);
+  if (file) {
+    const path = `${VFS_UPLOAD}/${targetName}_${sanitizeFilename(file.name)}`;
+    await writeBrowserFile(file, path);
+    return path;
+  }
+
+  const url = (byId(urlId) || nodes[urlId])?.value?.trim();
+  if (!url) return null;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_) {
+    throw new Error(`Invalid liftover URL: ${url}`);
+  }
+  if (!/^https?:$/.test(parsed.protocol)) {
+    throw new Error(`Liftover URL must use http(s): ${url}`);
+  }
+  const filename = sanitizeFilename(parsed.pathname.split("/").pop(), `${targetName}.dat`);
+  const path = `${VFS_UPLOAD}/${targetName}_${filename}`;
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Could not download ${url}: HTTP ${response.status}`);
+  }
+  await state.backend.webR.FS.writeFile(
+    path,
+    new Uint8Array(await response.arrayBuffer()),
+  );
   return path;
 }
 
@@ -598,11 +649,13 @@ function vcfColumnExpressions(schema) {
   }
   const altColumn = findSchemaColumn(schema, ["ALT"]);
   const altIdent = sqlIdentifier(altColumn.column_name);
+  const gtColumn = findSchemaColumn(schema, ["FORMAT_GT", "GT", "GENOTYPE"]);
   const altType = String(altColumn.column_type || "").toUpperCase();
   const altIsList = altType.includes("[]") || altType.startsWith("LIST");
   return {
     sampleSql: columnExpression(schema, ["SAMPLE_ID", "SAMPLE", "sample_id"], "VARCHAR", "''::VARCHAR"),
-    gtSql: columnExpression(schema, ["FORMAT_GT", "GT", "GENOTYPE"], "VARCHAR", "''::VARCHAR"),
+    gtSql: gtColumn ? `${sqlIdentifier(gtColumn.column_name)}::VARCHAR` : "''::VARCHAR",
+    hasGtSql: gtColumn ? "TRUE" : "FALSE",
     chromSql: columnExpression(schema, ["CHROM", "#CHROM"], "VARCHAR"),
     posSql: columnExpression(schema, ["POS"], "BIGINT"),
     refSql: columnExpression(schema, ["REF"], "VARCHAR"),
@@ -641,6 +694,7 @@ async function analyzeVcfBcf(file, inputBuild, analysisBuild, liftoverMode) {
 SELECT
   ${raw.sampleSql} AS sample_id,
   ${raw.gtSql} AS gt,
+  ${raw.hasGtSql} AS has_gt,
   ${raw.chromSql} AS input_chrom,
   ${raw.posSql} AS input_pos,
   ${raw.refSql} AS input_ref,
@@ -659,9 +713,9 @@ FROM user_variants_raw
     if (liftoverMode === "off") {
       throw new Error("Input build differs from the analysis build. Enable liftover or choose the matching analysis build.");
     }
-    const chainPath = await stageLiftoverFile("chain-file", "chain");
-    const srcRefPath = await stageLiftoverFile("src-ref-file", "src_ref");
-    const dstRefPath = await stageLiftoverFile("dst-ref-file", "dst_ref");
+    const chainPath = await stageLiftoverAsset("chain-file", "chain-url", "chain");
+    const srcRefPath = await stageLiftoverAsset("src-ref-file", "src-ref-url", "src_ref");
+    const dstRefPath = await stageLiftoverAsset("dst-ref-file", "dst-ref-url", "dst_ref");
     if (!chainPath || !srcRefPath || !dstRefPath) {
       throw new Error("Liftover requires chain, source FASTA, and destination FASTA files. These remain local in the browser VFS.");
     }
@@ -670,6 +724,7 @@ WITH raw_single_alt AS (
   SELECT
     ${raw.sampleSql} AS sample_id,
     ${raw.gtSql} AS gt,
+    ${raw.hasGtSql} AS has_gt,
     ${raw.chromSql} AS input_chrom,
     ${raw.posSql} AS input_pos,
     ${raw.refSql} AS input_ref,
@@ -686,6 +741,7 @@ WITH raw_single_alt AS (
   SELECT
     sample_id,
     gt,
+    has_gt,
     input_chrom,
     input_pos,
     input_ref,
@@ -700,6 +756,7 @@ WITH raw_single_alt AS (
 SELECT
   sample_id,
   gt,
+  has_gt,
   input_chrom,
   input_pos,
   input_ref,
@@ -724,11 +781,14 @@ FROM lifted
     failureSummary: "Could not normalize variants",
   }, async () => {
     await executeSql(`
+CREATE OR REPLACE TABLE user_variant_source AS
+${sourceSql}
+`);
+    await executeSql(`
 CREATE OR REPLACE TABLE user_variant_keyed AS
-WITH source_rows AS (${sourceSql}),
-filtered AS (
+WITH filtered AS (
   SELECT *
-  FROM source_rows
+  FROM user_variant_source
   WHERE mapped
     AND chrom IS NOT NULL
     AND pos IS NOT NULL
@@ -738,6 +798,10 @@ filtered AS (
     AND NOT contains(alt, ',')
     AND regexp_matches(upper(ref), '^[ACGT]+$')
     AND regexp_matches(upper(alt), '^[ACGT]+$')
+    AND (
+      NOT has_gt
+      OR coalesce(regexp_matches(gt, '(^|[/|])([1-9][0-9]*)([/|]|$)'), false)
+    )
 ), gt_parts AS (
   SELECT
     *,
@@ -807,8 +871,8 @@ SELECT
   a.clinvar_stars,
   a.odds_ratio,
   a.score,
-  coalesce(gi.risk_level, 'normal') AS risk_level,
-  coalesce(gi.interpretation, 'No genotype-specific interpretation is available for this genotype.') AS interpretation
+  ${annotationRiskSql()} AS risk_level,
+  ${annotationInterpretationSql()} AS interpretation
 FROM user_variant_keyed k
 JOIN variant_annotations a
   ON a.build = ${sqlString(analysisBuild)}
@@ -817,20 +881,69 @@ JOIN variant_annotations a
 LEFT JOIN genotype_interpretations gi
   ON gi.annotation_id = a.annotation_id
  AND gi.genotype_norm = k.genotype_norm
-ORDER BY ${buildRiskOrderSql("coalesce(gi.risk_level, 'normal')")}, a.score DESC, a.gene, a.annotation_id
+ORDER BY ${buildRiskOrderSql(annotationRiskSql())}, a.score DESC, a.gene, a.annotation_id
 `);
   });
 
   const keyedStats = await queryJson(`
 SELECT
   (SELECT count(*) FROM user_variants_raw)::BIGINT AS raw_records,
+  (SELECT count(*) FROM user_variant_source)::BIGINT AS source_records,
+  (
+    SELECT count(*) FROM user_variant_source
+    WHERE mapped
+      AND chrom IS NOT NULL
+      AND pos IS NOT NULL
+      AND ref IS NOT NULL
+      AND alt IS NOT NULL
+      AND alt_count = 1
+      AND NOT contains(alt, ',')
+      AND regexp_matches(upper(ref), '^[ACGT]+$')
+      AND regexp_matches(upper(alt), '^[ACGT]+$')
+  )::BIGINT AS allele_usable_records,
+  (
+    SELECT count(*) FROM user_variant_source
+    WHERE has_gt
+      AND mapped
+      AND chrom IS NOT NULL
+      AND pos IS NOT NULL
+      AND ref IS NOT NULL
+      AND alt IS NOT NULL
+      AND alt_count = 1
+      AND NOT contains(alt, ',')
+      AND regexp_matches(upper(ref), '^[ACGT]+$')
+      AND regexp_matches(upper(alt), '^[ACGT]+$')
+      AND NOT coalesce(regexp_matches(gt, '(^|[/|])([1-9][0-9]*)([/|]|$)'), false)
+  )::BIGINT AS skipped_non_alt_gt,
   (SELECT count(*) FROM user_variant_keyed)::BIGINT AS keyed_records,
   (SELECT count(*) FROM analysis_matches)::BIGINT AS matched_records
 `);
   return { stats: keyedStats[0] || {}, inputKind: "VCF/BCF" };
 }
 
-async function collectResults(context) {
+function resultSearchWhere(searchText = "") {
+  const term = String(searchText || "").trim();
+  if (!term) return "";
+  const pattern = sqlString(`%${term.toLowerCase()}%`);
+  return `WHERE lower(
+    coalesce(gene, '') || ' ' ||
+    coalesce(source_id, '') || ' ' ||
+    coalesce(annotation_id, '') || ' ' ||
+    coalesce(name, '') || ' ' ||
+    coalesce(significance, '') || ' ' ||
+    coalesce(category, '') || ' ' ||
+    coalesce(source, '') || ' ' ||
+    coalesce(input_genotype, '') || ' ' ||
+    coalesce(genotype_norm, '')
+  ) LIKE ${pattern}`;
+}
+
+function resultOrderSql() {
+  return `${buildRiskOrderSql()}, score DESC, category, gene, annotation_id`;
+}
+
+async function collectResults(context, searchText = "") {
+  const whereSql = resultSearchWhere(searchText);
   const summaryRows = await queryJson(`
 SELECT
   count(*)::BIGINT AS total_variants_found,
@@ -839,16 +952,19 @@ SELECT
   count(*) FILTER (WHERE category = 'trait')::BIGINT AS trait_count,
   count(*) FILTER (WHERE risk_level = 'high_risk')::BIGINT AS high_risk_count
 FROM analysis_matches
+${whereSql}
 `);
   const rows = await queryJson(`
 SELECT *
 FROM analysis_matches
-ORDER BY ${buildRiskOrderSql()}, score DESC, category, gene, annotation_id
+${whereSql}
+ORDER BY ${resultOrderSql()}
 LIMIT 1000
 `);
   const summary = summaryRows[0] || {};
+  state.currentSearch = String(searchText || "").trim();
   state.lastRows = rows;
-  state.lastSummary = { ...summary, ...context };
+  state.lastSummary = { ...summary, ...context, searchText: state.currentSearch };
   return { summary: state.lastSummary, rows };
 }
 
@@ -878,7 +994,7 @@ function renderStats(summary) {
   if (summary.inputKind === "23andMe") {
     return `${Number(stats.parsed_snps || 0).toLocaleString()} SNP rows parsed; ${Number(stats.skipped_no_call || 0).toLocaleString()} no-calls skipped.`;
   }
-  return `${Number(stats.raw_records || 0).toLocaleString()} raw records; ${Number(stats.keyed_records || 0).toLocaleString()} VariantKey rows; ${Number(stats.matched_records || 0).toLocaleString()} curated matches.`;
+  return `${Number(stats.raw_records || 0).toLocaleString()} raw records; ${Number(stats.keyed_records || 0).toLocaleString()} called alternate VariantKey rows; ${Number(stats.matched_records || 0).toLocaleString()} curated matches; ${Number(stats.skipped_non_alt_gt || 0).toLocaleString()} hom-ref/no-call records skipped.`;
 }
 
 function renderTimings() {
@@ -918,7 +1034,7 @@ function renderTable(rows, category) {
   <td><strong>${escapeHtml(row.gene)}</strong><br><span class="text-muted small">${escapeHtml(row.source_id || row.annotation_id)}</span></td>
   <td>${escapeHtml(row.name)}</td>
   <td><code>${escapeHtml(row.input_genotype || row.genotype_norm)}</code><br><span class="text-muted small">norm ${escapeHtml(row.genotype_norm)}</span></td>
-  <td>${escapeHtml(row.significance?.replaceAll("_", " "))}<br><span class="text-muted small">score ${escapeHtml(row.score)}</span></td>
+  <td>${escapeHtml(row.significance?.replaceAll("_", " "))}<br><span class="text-muted small">priority score ${escapeHtml(row.score)}</span></td>
   <td>
     <button class="btn btn-sm btn-outline-dark" type="button" data-bs-toggle="collapse" data-bs-target="#detail-${category}-${idx}">Details</button>
   </td>
@@ -992,17 +1108,42 @@ function renderResults(summary, rows) {
   </div>
 
   <div class="row g-3 mb-4">
-    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Curated matches</div><div class="display-6">${total.toLocaleString()}</div></div></div></div>
+    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Curated matches${summary.searchText ? " shown" : ""}</div><div class="display-6">${total.toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">High risk</div><div class="display-6 text-danger">${Number(summary.high_risk_count || 0).toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Health</div><div class="display-6">${Number(summary.health_risk_count || 0).toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Pharma + traits</div><div class="display-6">${(Number(summary.pharmacogenomics_count || 0) + Number(summary.trait_count || 0)).toLocaleString()}</div></div></div></div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-lg-6">
+          <label class="form-label" for="result-search">Search results with DuckDB</label>
+          <input id="result-search" class="form-control" type="search" value="${escapeHtml(summary.searchText || "")}" placeholder="gene, rsID, ClinVar term, category, genotype..." />
+        </div>
+        <div class="col-lg-3 d-flex gap-2">
+          <button id="result-search-button" type="button" class="btn btn-outline-primary">Search</button>
+          <button id="result-clear-search" type="button" class="btn btn-outline-secondary">Clear</button>
+        </div>
+        <div class="col-lg-3 d-flex gap-2 justify-content-lg-end">
+          <select id="export-format" class="form-select w-auto" aria-label="Export format">
+            <option value="tsv">TSV</option>
+            <option value="csv">CSV for Excel</option>
+            <option value="xlsx">Excel .xlsx</option>
+            <option value="parquet">Parquet</option>
+          </select>
+          <button id="download-button" type="button" class="btn btn-outline-success" ${total ? "" : "disabled"}>Export</button>
+        </div>
+      </div>
+      <div class="form-text mt-2">Search and export run against the browser DuckDB <code>analysis_matches</code> table. Exports include the current search filter.</div>
+    </div>
   </div>
 
   ${renderTimings()}
   <ul class="nav nav-tabs" role="tablist">${categoryTabs}</ul>
   <div class="tab-content border border-top-0 p-3 bg-white">${panes}</div>
 </section>`;
-  nodes["download-button"].disabled = rows.length === 0;
+  bindResultControls();
 }
 
 async function analyzeSelectedFile(file) {
@@ -1063,31 +1204,104 @@ async function analyzeSelectedFile(file) {
   }
 }
 
-function downloadLastRows() {
-  if (!state.lastRows.length) return;
-  const columns = [
-    "input_kind", "sample_id", "marker_id", "annotation_id", "source_id", "gene", "category", "name", "input_genotype", "genotype_norm",
-    "risk_level", "significance", "score", "variant_key_hex", "build", "interpretation",
-  ];
-  const tsv = rowsToTsv(state.lastRows, columns);
-  const blob = new Blob([tsv], { type: "text/tab-separated-values;charset=utf-8" });
+function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "duckgenesnap_results.tsv";
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+async function applyResultSearch(searchText) {
+  if (!state.lastSummary) return;
+  const context = {
+    inputKind: state.lastSummary.inputKind,
+    analysisBuild: state.lastSummary.analysisBuild,
+    stats: state.lastSummary.stats,
+  };
+  const { summary, rows } = await runTimedStep({
+    label: "Search results",
+    detail: "Filtering the browser DuckDB analysis_matches table.",
+    successSummary: "Search results are ready",
+    failureSummary: "Could not search results",
+  }, () => collectResults(context, searchText));
+  renderResults(summary, rows);
+}
+
+async function exportResults() {
+  if (!state.lastSummary) return;
+  const format = byId("export-format")?.value || "tsv";
+  const whereSql = resultSearchWhere(state.currentSearch);
+  const ext = format === "parquet" ? "parquet" : format === "xlsx" ? "xlsx" : format === "csv" ? "csv" : "tsv";
+  const outputPath = `${VFS_ROOT}/duckgenesnap_results_${Date.now()}.${ext}`;
+  const selectSql = `SELECT * FROM analysis_matches ${whereSql} ORDER BY ${resultOrderSql()}`;
+  await runTimedStep({
+    label: "Export results",
+    detail: `Writing ${format.toUpperCase()} from browser DuckDB.`,
+    successSummary: `${format.toUpperCase()} export is ready`,
+    failureSummary: "Could not export results",
+  }, async () => {
+    if (format === "xlsx") {
+      if (!window.XLSX) {
+        throw new Error("The SheetJS XLSX helper did not load; use CSV or Parquet instead.");
+      }
+      const rows = await queryJson(selectSql);
+      const workbook = window.XLSX.utils.book_new();
+      const worksheet = window.XLSX.utils.json_to_sheet(rows);
+      window.XLSX.utils.book_append_sheet(workbook, worksheet, "analysis_matches");
+      const bytes = window.XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      downloadBlob(
+        new Blob([bytes], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+        "duckgenesnap_results.xlsx",
+      );
+      return;
+    }
+
+    let mime = "text/tab-separated-values;charset=utf-8";
+    let copyOptions = "HEADER, DELIMITER '\t'";
+    if (format === "csv") {
+      mime = "text/csv;charset=utf-8";
+      copyOptions = "HEADER, DELIMITER ','";
+    } else if (format === "parquet") {
+      mime = "application/vnd.apache.parquet";
+      copyOptions = "FORMAT PARQUET, COMPRESSION ZSTD";
+    }
+    await executeSql(`COPY (${selectSql}) TO ${sqlString(outputPath)} (${copyOptions})`);
+    const bytes = await state.backend.webR.FS.readFile(outputPath);
+    downloadBlob(new Blob([bytes], { type: mime }), `duckgenesnap_results.${ext}`);
+  });
+}
+
+function bindResultControls() {
+  const searchInput = byId("result-search");
+  byId("result-search-button")?.addEventListener("click", () => {
+    applyResultSearch(searchInput?.value || "");
+  });
+  byId("result-clear-search")?.addEventListener("click", () => {
+    if (searchInput) searchInput.value = "";
+    applyResultSearch("");
+  });
+  searchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyResultSearch(searchInput.value || "");
+    }
+  });
+  byId("download-button")?.addEventListener("click", exportResults);
+}
+
 function resetUi() {
   nodes.results.innerHTML = "";
   nodes.messages.innerHTML = "";
   nodes["file-input"].value = "";
-  nodes["download-button"].disabled = true;
   state.lastRows = [];
   state.lastSummary = null;
+  state.currentSearch = "";
   state.timings = [];
   if (nodes["timing-card"]) nodes["timing-card"].hidden = true;
   renderTimingList();
@@ -1104,8 +1318,13 @@ async function loadDemo() {
 }
 
 function updateLiftoverVisibility() {
-  const show = nodes["liftover-mode"].value !== "off";
-  nodes["liftover-card"].hidden = !show;
+  const tools = byId("advanced-tools");
+  if (!tools) return;
+  if (nodes["liftover-mode"].value !== "off") {
+    tools.classList.add("border-primary");
+  } else {
+    tools.classList.remove("border-primary");
+  }
 }
 
 function bindEvents() {
@@ -1129,7 +1348,6 @@ function bindEvents() {
     }
   });
   nodes["reset-button"].addEventListener("click", resetUi);
-  nodes["download-button"].addEventListener("click", downloadLastRows);
   nodes["liftover-mode"].addEventListener("change", updateLiftoverVisibility);
 }
 
