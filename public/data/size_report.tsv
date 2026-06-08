@@ -1,7 +1,7 @@
 file	bytes	mib
-variant_annotations.parquet	66873668	63.776
+variant_annotations.parquet	100356489	95.707
 genotype_interpretations.parquet	3367	0.003
 variant_keys.parquet	15208692	14.504
-asset_summary.parquet	486	0
-source_summary.parquet	554	0.001
+asset_summary.parquet	483	0
+source_summary.parquet	567	0.001
 index_summary.parquet	1262	0.001

@@ -114,6 +114,15 @@ option_list <- list(
     )
   ),
   make_opt(
+    c("--gwas-grch38-to-grch37-chain"),
+    default = NULL,
+    metavar = "PATH",
+    help = paste(
+      "UCSC hg38ToHg19 chain used to add lifted GRCh37 GWAS loci.",
+      "Defaults to .cache/hg38ToHg19.over.chain.gz when available."
+    )
+  ),
+  make_opt(
     c("--gwas-pvalue-threshold"),
     type = "double",
     default = 5e-8,
@@ -840,11 +849,56 @@ resolve_gwas_tsv <- function() {
   file.path(extract_dir, tsv_name)
 }
 
+resolve_gwas_chain <- function() {
+  explicit <- opt("gwas_grch38_to_grch37_chain")
+  if (!is.null(explicit) && nzchar(explicit)) {
+    return(path_arg(explicit))
+  }
+
+  chain_path <- file.path(repo_root, ".cache", "hg38ToHg19.over.chain.gz")
+  if (file.exists(chain_path)) {
+    return(chain_path)
+  }
+
+  dir.create(dirname(chain_path), recursive = TRUE, showWarnings = FALSE)
+  url <- paste0(
+    "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/",
+    "hg38ToHg19.over.chain.gz"
+  )
+  message("Downloading GWAS GRCh38->GRCh37 chain from ", url)
+  ok <- tryCatch({
+    utils::download.file(url, chain_path, mode = "wb", quiet = TRUE)
+    TRUE
+  }, error = function(err) {
+    warning(
+      "Could not download GWAS liftover chain: ",
+      conditionMessage(err),
+      call. = FALSE
+    )
+    FALSE
+  })
+  if (ok && file.exists(chain_path)) chain_path else NULL
+}
+
+create_dummy_liftover_fasta <- function() {
+  # duckdb_liftover requires FASTA arguments, but GWAS Catalog rows are
+  # coordinate-only here (ref_col/alt_col are NULL), so no contig sequence is
+  # fetched by the row kernel. A one-record indexed FASTA satisfies the API.
+  fasta <- tempfile("duckgenesnap_liftover_dummy_", fileext = ".fa")
+  writeLines(c(">dummy", "A"), fasta)
+  DBI::dbGetQuery(
+    con,
+    sprintf("SELECT * FROM fasta_index(%s)", sql_quote_string(fasta))
+  )
+  fasta
+}
+
 load_gwas <- function(
   path,
   build_label,
   p_threshold = 5e-8,
-  row_limit = 0L
+  row_limit = 0L,
+  grch38_to_grch37_chain = NULL
 ) {
   if (is.null(path)) {
     return(0L)
@@ -945,7 +999,169 @@ load_gwas <- function(
     "FROM chosen"
   )
   exec(sprintf(gwas_sql, cn, p_threshold, limit_sql, build_sql, build_sql))
-  count_annotations("gwas_catalog", build_label)
+
+  if (identical(build_label, "GRCh38") &&
+      !is.null(grch38_to_grch37_chain) &&
+      file.exists(grch38_to_grch37_chain)) {
+    message(
+      "Adding GWAS Catalog GRCh37 loci with duckdb_liftover from ",
+      grch38_to_grch37_chain
+    )
+    dummy_fasta <- create_dummy_liftover_fasta()
+    lift_chrom_sql <- sql(
+      "CASE",
+      "  WHEN chrom_norm_value = 'MT' THEN 'chrM'",
+      "  ELSE 'chr' || chrom_norm_value",
+      "END"
+    )
+    exec(sprintf(sql(
+      "CREATE OR REPLACE TEMP TABLE gwas_lift_input AS",
+      "WITH filtered AS (",
+      "  SELECT",
+      "    (%s) AS chrom_norm_value,",
+      "    try_cast(\"CHR_POS\" AS BIGINT) AS pos_value,",
+      "    try_cast(\"P-VALUE\" AS DOUBLE) AS p_value",
+      "  FROM gwas_raw",
+      "  WHERE try_cast(\"CHR_POS\" AS BIGINT) IS NOT NULL",
+      "    AND regexp_matches(",
+      "      coalesce(\"CHR_ID\", ''),",
+      "      '^(chr)?([0-9]{1,2}|X|Y|M|MT)$'",
+      "    )",
+      "    AND try_cast(\"P-VALUE\" AS DOUBLE) <= %.17g",
+      "    AND coalesce(\"CNV\", 'N') <> 'Y'",
+      "),",
+      "chosen AS (",
+      "  SELECT *",
+      "  FROM filtered",
+      "  ORDER BY p_value ASC NULLS LAST",
+      "  %s",
+      ")",
+      "SELECT DISTINCT",
+      "  (%s)::VARCHAR AS lift_chrom,",
+      "  pos_value::BIGINT AS pos_value",
+      "FROM chosen"
+    ), cn, p_threshold, limit_sql, lift_chrom_sql))
+    exec(sql(
+      "CREATE OR REPLACE TEMP TABLE gwas_lifted_loci AS",
+      "SELECT",
+      "  src_chrom::VARCHAR AS src_chrom,",
+      "  src_pos::BIGINT AS src_pos,",
+      "  dest_chrom::VARCHAR AS dest_chrom,",
+      sprintf("  (%s)::VARCHAR AS lifted_chrom_norm,", chrom_norm_expr("dest_chrom")),
+      "  dest_pos::BIGINT AS dest_pos",
+      "FROM duckdb_liftover(",
+      "  'gwas_lift_input',",
+      "  'lift_chrom',",
+      "  'pos_value',",
+      sprintf("  chain_path := %s,", sql_quote_string(grch38_to_grch37_chain)),
+      sprintf("  dst_fasta_ref := %s,", sql_quote_string(dummy_fasta)),
+      sprintf("  src_fasta_ref := %s", sql_quote_string(dummy_fasta)),
+      ")",
+      "WHERE mapped",
+      "  AND dest_chrom IS NOT NULL",
+      "  AND dest_pos IS NOT NULL"
+    ))
+
+    build37_sql <- sql_quote_string("GRCh37")
+    lifted_chrom_norm_sql <- chrom_norm_expr("l.dest_chrom")
+    gwas_lifted_sql <- sql(
+      "INSERT INTO variant_annotations",
+      "WITH filtered AS (",
+      "  SELECT",
+      "    *,",
+      "    (%s) AS chrom_norm_value,",
+      "    try_cast(\"CHR_POS\" AS BIGINT) AS pos_value,",
+      "    try_cast(\"P-VALUE\" AS DOUBLE) AS p_value,",
+      "    try_cast(\"OR or BETA\" AS DOUBLE) AS effect_value,",
+      "    upper(regexp_extract(",
+      "      \"STRONGEST SNP-RISK ALLELE\",",
+      "      '-([ACGT])$',",
+      "      1",
+      "    )) AS parsed_risk_allele",
+      "  FROM gwas_raw",
+      "  WHERE try_cast(\"CHR_POS\" AS BIGINT) IS NOT NULL",
+      "    AND regexp_matches(",
+      "      coalesce(\"CHR_ID\", ''),",
+      "      '^(chr)?([0-9]{1,2}|X|Y|M|MT)$'",
+      "    )",
+      "    AND try_cast(\"P-VALUE\" AS DOUBLE) <= %.17g",
+      "    AND coalesce(\"CNV\", 'N') <> 'Y'",
+      "),",
+      "chosen AS (",
+      "  SELECT *",
+      "  FROM filtered",
+      "  ORDER BY p_value ASC NULLS LAST",
+      "  %s",
+      ")",
+      "SELECT",
+      "  (",
+      "    'gwas_catalog:' || %s || ':' || %s ||",
+      "    ':' || l.dest_pos::VARCHAR || ':' ||",
+      "    coalesce(NULLIF(\"SNPS\", ''),",
+      "      NULLIF(\"SNP_ID_CURRENT\", ''), 'unknown')",
+      "  )::VARCHAR AS annotation_id,",
+      "  'gwas_catalog'::VARCHAR AS source,",
+      "  coalesce(NULLIF(\"SNPS\", ''), NULLIF(\"SNP_ID_CURRENT\", ''))",
+      "    ::VARCHAR AS source_id,",
+      "  %s::VARCHAR AS build,",
+      "  l.dest_chrom::VARCHAR AS chrom,",
+      "  %s::VARCHAR AS chrom_norm,",
+      "  l.dest_pos::BIGINT AS pos,",
+      "  coalesce(",
+      "    NULLIF(\"MAPPED_GENE\", ''),",
+      "    NULLIF(\"REPORTED GENE(S)\", '')",
+      "  )::VARCHAR AS gene,",
+      "  'trait'::VARCHAR AS category,",
+      "  coalesce(NULLIF(\"DISEASE/TRAIT\", ''),",
+      "    'GWAS Catalog association')::VARCHAR AS name,",
+      "  'association'::VARCHAR AS significance,",
+      "  (",
+      "    'GWAS Catalog association: ' ||",
+      "    coalesce(\"DISEASE/TRAIT\", '') || '; p=' ||",
+      "    coalesce(\"P-VALUE\", '') || '; effect=' ||",
+      "    coalesce(\"OR or BETA\", '') || '; study=' ||",
+      "    coalesce(\"STUDY\", '') ||",
+      "    '; source_build=GRCh38; lifted_to=GRCh37'",
+      "  )::VARCHAR AS description,",
+      "  NULLIF(parsed_risk_allele, '')::VARCHAR AS risk_allele,",
+      "  NULL::VARCHAR AS normal_allele,",
+      "  (",
+      "    '{\"pubmed\":\"' || coalesce(\"PUBMEDID\", '') ||",
+      "    '\",\"link\":\"' || coalesce(\"LINK\", '') || '\"}'",
+      "  )::VARCHAR AS external_ids,",
+      "  NULLIF(\"PUBMEDID\", '')::VARCHAR AS publications,",
+      "  0::INTEGER AS clinvar_stars,",
+      "  effect_value::DOUBLE AS odds_ratio,",
+      "  2.0::DOUBLE * greatest(coalesce(effect_value, 1.0), 1.0)",
+      "    AS score,",
+      "  (",
+      "    'p=' || coalesce(\"P-VALUE\", '') || ';pmid=' ||",
+      "    coalesce(\"PUBMEDID\", '') || ';risk_allele=' ||",
+      "    coalesce(\"STRONGEST SNP-RISK ALLELE\", '') ||",
+      "    ';source_build=GRCh38;lifted_to=GRCh37;source_pos=' ||",
+      "    chrom_norm_value || ':' || pos_value::VARCHAR",
+      "  )::VARCHAR AS source_payload",
+      "FROM chosen g",
+      "JOIN gwas_lifted_loci l",
+      "  ON l.src_chrom = (CASE",
+      "    WHEN g.chrom_norm_value = 'MT' THEN 'chrM'",
+      "    ELSE 'chr' || g.chrom_norm_value",
+      "  END)",
+      " AND l.src_pos = g.pos_value"
+    )
+    exec(sprintf(
+      gwas_lifted_sql,
+      cn,
+      p_threshold,
+      limit_sql,
+      build37_sql,
+      lifted_chrom_norm_sql,
+      build37_sql,
+      lifted_chrom_norm_sql
+    ))
+  }
+
+  count_annotations("gwas_catalog")
 }
 
 load_pharmgkb <- function(path, build_label) {
@@ -1082,11 +1298,18 @@ clinvar38_n <- load_clinvar(
   "GRCh38",
   opt("clinvar_row_limit")
 )
+gwas_path <- resolve_gwas_tsv()
+gwas_chain <- if (!is.null(gwas_path) && identical(opt("gwas_build"), "GRCh38")) {
+  resolve_gwas_chain()
+} else {
+  NULL
+}
 gwas_n <- load_gwas(
-  resolve_gwas_tsv(),
+  gwas_path,
   opt("gwas_build"),
   opt("gwas_pvalue_threshold"),
-  opt("gwas_row_limit")
+  opt("gwas_row_limit"),
+  gwas_chain
 )
 pharmgkb_n <- load_pharmgkb(opt("pharmgkb_tsv"), opt("pharmgkb_build"))
 

@@ -1,6 +1,6 @@
 {
   "name": "DuckGeneSnap locus annotation bundle",
-  "generated_at": "2026-06-08T14:27:27Z",
+  "generated_at": "2026-06-08T17:04:10Z",
   "schema_version": 3,
   "matching_policy": "locus_first_with_vcf_variantkey_refinement",
   "supported_builds": [
@@ -19,7 +19,7 @@
   "counts": {
     "genotype_interpretations": 51,
     "index_summary": 4,
-    "variant_annotations": 1820395,
+    "variant_annotations": 2624526,
     "variant_keys": 1392488
   },
   "sources": [
@@ -32,6 +32,11 @@
       "source": "clinvar",
       "build": "GRCh38",
       "row_count": 507893
+    },
+    {
+      "source": "gwas_catalog",
+      "build": "GRCh37",
+      "row_count": 804131
     },
     {
       "source": "gwas_catalog",
@@ -78,8 +83,8 @@
   "sizes": [
     {
       "file": "variant_annotations.parquet",
-      "bytes": 66873668,
-      "mib": 63.776
+      "bytes": 100356489,
+      "mib": 95.707
     },
     {
       "file": "genotype_interpretations.parquet",
@@ -93,12 +98,12 @@
     },
     {
       "file": "asset_summary.parquet",
-      "bytes": 486,
+      "bytes": 483,
       "mib": 0
     },
     {
       "file": "source_summary.parquet",
-      "bytes": 554,
+      "bytes": 567,
       "mib": 0.001
     },
     {

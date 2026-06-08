@@ -20,8 +20,8 @@ server.
 DuckGeneSnap accepts 23andMe-style text and VCF/BCF/VCF.GZ files, runs
 all work locally in the browser, and queries shipped Parquet assets with
 DuckDB. The assets include ClinVar variant-summary rows for GRCh37 and
-GRCh38, GWAS Catalog associations, and a small seed table for
-examples/tests.
+GRCh38, GWAS Catalog associations on both builds, and a small seed table
+for examples/tests.
 
 VCF/BCF inputs are filtered to called alternate records and matched by
 exact `variant_key` when REF/ALT alleles are available. Results are
@@ -96,14 +96,14 @@ Parquet row group trade-offs.
 
 ## Committed annotation asset sizes
 
-| file                             |    bytes |    mib |
-|:---------------------------------|---------:|-------:|
-| variant_annotations.parquet      | 66873668 | 63.776 |
-| genotype_interpretations.parquet |     3367 |  0.003 |
-| variant_keys.parquet             | 15208692 | 14.504 |
-| asset_summary.parquet            |      486 |  0.000 |
-| source_summary.parquet           |      554 |  0.001 |
-| index_summary.parquet            |     1262 |  0.001 |
+| file                             |     bytes |    mib |
+|:---------------------------------|----------:|-------:|
+| variant_annotations.parquet      | 100356489 | 95.707 |
+| genotype_interpretations.parquet |      3367 |  0.003 |
+| variant_keys.parquet             |  15208692 | 14.504 |
+| asset_summary.parquet            |       483 |  0.000 |
+| source_summary.parquet           |       567 |  0.001 |
+| index_summary.parquet            |      1262 |  0.001 |
 
 ## Demo and test inputs
 

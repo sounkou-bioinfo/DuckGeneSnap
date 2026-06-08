@@ -30,7 +30,7 @@ queried locally. No genotype data is uploaded to a server.
 DuckGeneSnap accepts 23andMe-style text and VCF/BCF/VCF.GZ files, runs all work
 locally in the browser, and queries shipped Parquet assets with DuckDB. The
 assets include ClinVar variant-summary rows for GRCh37 and GRCh38, GWAS Catalog
-associations, and a small seed table for examples/tests.
+associations on both builds, and a small seed table for examples/tests.
 
 VCF/BCF inputs are filtered to called alternate records and matched by exact
 `variant_key` when REF/ALT alleles are available. Results are searchable,

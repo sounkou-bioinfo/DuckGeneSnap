@@ -446,18 +446,37 @@ function normalizeGenotype(genotype) {
   return gt;
 }
 
-function chipQueryChrom(chrom, style) {
+function normalizeChromToken(chrom) {
+  const raw = String(chrom || "").trim().replace(/^chr/i, "");
+  const upper = raw.toUpperCase();
+  return upper === "M" ? "MT" : upper;
+}
+
+function uniqueValues(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
+}
+
+function chipChromAliases(chrom) {
   const raw = String(chrom || "").trim();
   const noChr = raw.replace(/^chr/i, "");
-  if (style === "add_chr") {
-    if (/^chr/i.test(raw)) return raw;
-    if (/^(M|MT)$/i.test(noChr)) return "chrM";
-    return `chr${noChr}`;
-  }
-  if (style === "remove_chr") {
-    return /^M$/i.test(noChr) ? "MT" : noChr;
-  }
-  return raw;
+  const norm = normalizeChromToken(raw);
+  const chrNorm = norm === "MT" ? "chrM" : `chr${norm}`;
+  return uniqueValues([
+    raw,
+    noChr,
+    norm,
+    chrNorm,
+    `chr${norm}`,
+    norm === "MT" ? "M" : "",
+  ]);
 }
 
 function parse23AndMe(text) {
@@ -508,7 +527,7 @@ function rowsToTsv(rows, columns) {
   return `${columns.join("\t")}\n${rows.map((row) => columns.map((col) => escapeCell(row[col])).join("\t")).join("\n")}\n`;
 }
 
-function parseChipForVcf(text, chromStyle) {
+function parseChipForVcf(text) {
   const rows = [];
   const stats = {
     total_lines: 0,
@@ -545,7 +564,7 @@ function parseChipForVcf(text, chromStyle) {
       row_id: rows.length + 1,
       marker_id,
       chrom,
-      query_chrom: chipQueryChrom(chrom, chromStyle),
+      chrom_norm: normalizeChromToken(chrom),
       pos,
       bed_start: pos - 1,
       bed_end: pos,
@@ -560,14 +579,20 @@ function parseChipForVcf(text, chromStyle) {
   return { rows, stats };
 }
 
-function chipBedRows(rows) {
-  const seen = new Set();
+function chipAliasRows(rows) {
   const out = [];
   for (const row of rows) {
-    const key = `${row.query_chrom}\t${row.bed_start}\t${row.bed_end}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ chrom: row.query_chrom, start: row.bed_start, end: row.bed_end });
+    chipChromAliases(row.chrom).forEach((queryChrom, index) => {
+      out.push({
+        row_id: row.row_id,
+        chrom_norm: row.chrom_norm,
+        query_chrom: queryChrom,
+        alias_priority: index,
+        pos: row.pos,
+        bed_start: row.bed_start,
+        bed_end: row.bed_end,
+      });
+    });
   }
   return out;
 }
@@ -737,6 +762,19 @@ async function stageToolAsset(inputId, urlId, targetName, label = "asset") {
 
 async function stageLiftoverAsset(inputId, urlId, targetName) {
   return stageToolAsset(inputId, urlId, targetName, "liftover asset");
+}
+
+async function ensureFastaIndex(fastaPath, label = "FASTA") {
+  const indexPath = `${fastaPath}.fai`;
+  const rows = await queryJson(`
+SELECT *
+FROM fasta_index(${sqlString(fastaPath)}, index_path := ${sqlString(indexPath)})
+`);
+  const row = rows[0] || {};
+  if (row.success === false) {
+    throw new Error(`Could not create ${label} index.`);
+  }
+  return row.index_path || indexPath;
 }
 
 function findSchemaColumn(schema, candidates) {
@@ -1749,6 +1787,8 @@ async function runLiftoverTool() {
     if (!chainPath || !srcRefPath || !dstRefPath) {
       throw new Error("Liftover requires chain, source FASTA, and destination FASTA files or URLs.");
     }
+    await ensureFastaIndex(srcRefPath, "source FASTA");
+    const dstRefIndexPath = await ensureFastaIndex(dstRefPath, "destination FASTA");
 
     await runTimedStep({
       label: "Read liftover VCF/BCF",
@@ -1865,7 +1905,8 @@ FROM duckhts_bcftools_norm(
   chrom_col := 'chrom',
   pos_col := 'pos',
   ref_col := 'ref',
-  alt_col := 'alt'
+  alt_col := 'alt',
+  fasta_index_path := ${sqlString(dstRefIndexPath)}
 )
 WHERE array_length(alt_normed) = 1
 `);
@@ -1949,18 +1990,19 @@ async function runChipToVcfTool() {
 
   try {
     if (!state.backend.ready) await warmBackend();
-    const chromStyle = byId("chip-vcf-chrom-style")?.value || "keep";
     const buildLabel = byId("chip-vcf-build")?.value || "custom";
     const sampleId = vcfSampleId(byId("chip-vcf-sample-id")?.value || "SAMPLE");
     const emitHomAlt = byId("chip-vcf-emit-hom-alt")?.checked !== false;
     const refPath = await stageToolAsset("chip-vcf-ref-file", "chip-vcf-ref-url", "chip_ref", "reference FASTA");
     if (!refPath) throw new Error("Choose a reference FASTA file or URL.");
+    const refIndexPath = await ensureFastaIndex(refPath, "reference FASTA");
 
-    const parsed = parseChipForVcf(await fileTextMaybeGzip(input), chromStyle);
+    const parsed = parseChipForVcf(await fileTextMaybeGzip(input));
     if (!parsed.rows.length) {
       throw new Error("No chip rows with marker, chromosome, position, and genotype were found.");
     }
     const chipPath = `${VFS_UPLOAD}/chip_to_vcf_${Date.now()}.tsv`;
+    const aliasPath = `${VFS_UPLOAD}/chip_to_vcf_${Date.now()}.aliases.tsv`;
     const bedPath = `${VFS_UPLOAD}/chip_to_vcf_${Date.now()}.bed`;
     await state.backend.webR.FS.writeFile(
       chipPath,
@@ -1968,7 +2010,7 @@ async function runChipToVcfTool() {
         "row_id",
         "marker_id",
         "chrom",
-        "query_chrom",
+        "chrom_norm",
         "pos",
         "bed_start",
         "bed_end",
@@ -1980,8 +2022,16 @@ async function runChipToVcfTool() {
       ])),
     );
     await state.backend.webR.FS.writeFile(
-      bedPath,
-      textEncoder.encode(chipBedRows(parsed.rows).map((row) => `${row.chrom}\t${row.start}\t${row.end}`).join("\n") + "\n"),
+      aliasPath,
+      textEncoder.encode(rowsToTsv(chipAliasRows(parsed.rows), [
+        "row_id",
+        "chrom_norm",
+        "query_chrom",
+        "alias_priority",
+        "pos",
+        "bed_start",
+        "bed_end",
+      ])),
     );
 
     await runTimedStep({
@@ -1996,7 +2046,7 @@ SELECT
   row_id::BIGINT AS row_id,
   marker_id::VARCHAR AS marker_id,
   chrom::VARCHAR AS chrom,
-  query_chrom::VARCHAR AS query_chrom,
+  chrom_norm::VARCHAR AS chrom_norm,
   pos::BIGINT AS pos,
   bed_start::BIGINT AS bed_start,
   bed_end::BIGINT AS bed_end,
@@ -2008,12 +2058,101 @@ SELECT
 FROM read_csv_auto(${sqlString(chipPath)}, delim='\t', header=true)
 `);
       await executeSql(`
+CREATE OR REPLACE TABLE chip_chrom_aliases AS
+SELECT
+  row_id::BIGINT AS row_id,
+  chrom_norm::VARCHAR AS chrom_norm,
+  query_chrom::VARCHAR AS query_chrom,
+  alias_priority::BIGINT AS alias_priority,
+  pos::BIGINT AS pos,
+  bed_start::BIGINT AS bed_start,
+  bed_end::BIGINT AS bed_end
+FROM read_csv_auto(${sqlString(aliasPath)}, delim='\t', header=true)
+`);
+      await executeSql(`
+COPY (
+  SELECT query_chrom, 0 AS bed_start, 1 AS bed_end
+  FROM chip_chrom_aliases
+  GROUP BY query_chrom
+  ORDER BY min(alias_priority), query_chrom
+) TO ${sqlString(bedPath)} (DELIMITER '\t', HEADER false)
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_chrom_probe_hits AS
+SELECT chrom::VARCHAR AS query_chrom
+FROM fasta_nuc(
+  ${sqlString(refPath)},
+  bed_path := ${sqlString(bedPath)},
+  index_path := ${sqlString(refIndexPath)},
+  include_seq := false
+)
+GROUP BY chrom
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_chrom_map AS
+WITH candidates AS (
+  SELECT
+    a.chrom_norm,
+    a.query_chrom,
+    min(a.alias_priority) AS alias_priority
+  FROM chip_chrom_aliases a
+  JOIN chip_chrom_probe_hits h
+    ON h.query_chrom = a.query_chrom
+  GROUP BY a.chrom_norm, a.query_chrom
+)
+SELECT chrom_norm, query_chrom
+FROM candidates
+QUALIFY row_number() OVER (
+  PARTITION BY chrom_norm
+  ORDER BY alias_priority, query_chrom
+) = 1
+`);
+      const mappedChroms = await queryJson(`SELECT count(*)::BIGINT AS n FROM chip_chrom_map`);
+      if (!Number(mappedChroms[0]?.n || 0)) {
+        throw new Error("No chip chromosome names matched the FASTA index.");
+      }
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_ref_bed AS
+SELECT DISTINCT
+  m.query_chrom,
+  c.bed_start,
+  c.bed_end
+FROM chip_vcf_input c
+JOIN chip_chrom_map m
+  ON m.chrom_norm = c.chrom_norm
+ORDER BY m.query_chrom, c.bed_start, c.bed_end
+`);
+      await executeSql(`
+COPY (
+  SELECT query_chrom, bed_start, bed_end
+  FROM chip_ref_bed
+) TO ${sqlString(bedPath)} (DELIMITER '\t', HEADER false)
+`);
+      await executeSql(`
 CREATE OR REPLACE TABLE chip_ref_bases AS
 SELECT
   chrom::VARCHAR AS query_chrom,
   (start + 1)::BIGINT AS pos,
   upper(seq::VARCHAR) AS ref_base
-FROM fasta_nuc(${sqlString(refPath)}, bed_path := ${sqlString(bedPath)}, include_seq := true)
+FROM fasta_nuc(
+  ${sqlString(refPath)},
+  bed_path := ${sqlString(bedPath)},
+  index_path := ${sqlString(refIndexPath)},
+  include_seq := true
+)
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_ref_by_row AS
+SELECT
+  c.row_id,
+  m.query_chrom,
+  r.ref_base
+FROM chip_vcf_input c
+LEFT JOIN chip_chrom_map m
+  ON m.chrom_norm = c.chrom_norm
+LEFT JOIN chip_ref_bases r
+  ON r.query_chrom = m.query_chrom
+ AND r.pos = c.pos
 `);
     });
 
@@ -2029,13 +2168,13 @@ CREATE OR REPLACE TABLE chip_harmonized AS
 WITH joined AS (
   SELECT
     c.*,
+    r.query_chrom AS resolved_chrom,
     r.ref_base,
     CASE c.allele1 WHEN 'A' THEN 'T' WHEN 'C' THEN 'G' WHEN 'G' THEN 'C' WHEN 'T' THEN 'A' ELSE NULL END AS allele1_rc,
     CASE c.allele2 WHEN 'A' THEN 'T' WHEN 'C' THEN 'G' WHEN 'G' THEN 'C' WHEN 'T' THEN 'A' ELSE NULL END AS allele2_rc
   FROM chip_vcf_input c
-  LEFT JOIN chip_ref_bases r
-    ON r.query_chrom = c.query_chrom
-   AND r.pos = c.pos
+  LEFT JOIN chip_ref_by_row r
+    ON r.row_id = c.row_id
 ), classified AS (
   SELECT
     *,
@@ -2105,7 +2244,7 @@ SELECT
 FROM duckhts_bcftools_norm(
   'chip_vcf_records',
   ${sqlString(refPath)},
-  chrom_col := 'query_chrom',
+  chrom_col := 'resolved_chrom',
   pos_col := 'pos',
   ref_col := 'ref',
   alt_col := 'alt'
@@ -2116,7 +2255,7 @@ WHERE array_length(alt_normed) = 1
 CREATE OR REPLACE TABLE chip_vcf_munge AS
 SELECT *
 FROM duckdb_munge(
-  ${sqlString("(SELECT query_chrom AS CHR, final_pos AS BP, row_id::VARCHAR AS SNP, final_alt AS A1, final_ref AS A2 FROM chip_vcf_normalized) AS chip_munge_input")},
+  ${sqlString("(SELECT resolved_chrom AS CHR, final_pos AS BP, row_id::VARCHAR AS SNP, final_alt AS A1, final_ref AS A2 FROM chip_vcf_normalized) AS chip_munge_input")},
   column_map := map(['CHR','BP','A1','A2','SNP'], ['CHR','BP','A1','A2','SNP']),
   fasta_ref := ${sqlString(refPath)}
 )
@@ -2143,7 +2282,7 @@ SELECT
   h.row_id,
   h.marker_id,
   h.chrom,
-  h.query_chrom,
+  h.resolved_chrom,
   h.pos,
   h.genotype,
   h.ref_base,
@@ -2189,7 +2328,7 @@ FROM chip_conversion_qc
     await executeSql(`
 COPY (
   SELECT
-    query_chrom AS "#CHROM",
+    resolved_chrom AS "#CHROM",
     vcf_pos AS POS,
     marker_id AS ID,
     vcf_ref AS REF,
@@ -2200,7 +2339,7 @@ COPY (
     'GT' AS FORMAT,
     gt AS ${sqlIdentifier(sampleId)}
   FROM chip_vcf_final
-  ORDER BY query_chrom, vcf_pos, marker_id
+  ORDER BY resolved_chrom, vcf_pos, marker_id
 ) TO ${sqlString(vcfBodyPath)} (HEADER, DELIMITER '\t')
 `);
     await executeSql(`COPY (SELECT * FROM chip_conversion_qc ORDER BY row_id) TO ${sqlString(qcPath)} (HEADER, DELIMITER '\t')`);
