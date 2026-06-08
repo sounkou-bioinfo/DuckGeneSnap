@@ -35,8 +35,8 @@ server.
   and FASTA files are supplied by the user.
 - DuckBedQC-style step timing modal and per-run timing table.
 - Searchable, paged, scrollable result tables backed by browser DuckDB,
-  with column filters plus TSV, CSV, Excel `.xlsx`, and Parquet exports
-  near the result table.
+  with column filters, ClinVar review-status stars, plus TSV, CSV, Excel
+  `.xlsx`, and Parquet exports near the result table.
 - VCF/gVCF record filtering defaults to called alternate variants only,
   which skips gVCF reference blocks, symbolic alleles, hom-ref
   genotypes, and no-calls.

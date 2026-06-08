@@ -953,6 +953,7 @@ function normalizeResultFilters(filters = {}) {
     category: String(filters.category || "").trim(),
     significance: String(filters.significance || "").trim(),
     risk: String(filters.risk || "").trim(),
+    minStars: String(filters.minStars || "").trim(),
     limit: Math.min(Math.max(Number(filters.limit || 250), 25), 1000),
     offset: Math.max(Number(filters.offset || 0), 0),
   };
@@ -988,6 +989,10 @@ function resultFiltersWhere(filters = {}) {
   if (f.category) conditions.push(`category = ${sqlString(f.category)}`);
   if (f.significance) conditions.push(`significance = ${sqlString(f.significance)}`);
   if (f.risk) conditions.push(`risk_level = ${sqlString(f.risk)}`);
+  if (f.minStars) {
+    const stars = Math.min(Math.max(Number(f.minStars), 0), 4);
+    conditions.push(`source = 'clinvar' AND coalesce(clinvar_stars, 0) >= ${stars}`);
+  }
   return conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 }
 
@@ -1044,6 +1049,22 @@ function categoryLabel(category) {
 function riskBadge(risk) {
   const cls = riskClasses[risk] || "secondary";
   return `<span class="badge text-bg-${cls}">${escapeHtml(String(risk || "unknown").replaceAll("_", " "))}</span>`;
+}
+
+function clinVarStarsHtml(row) {
+  if (String(row.source || "").toLowerCase() !== "clinvar") return "";
+  const value = Number(row.clinvar_stars ?? 0);
+  const stars = Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 4);
+  const filled = "★".repeat(stars);
+  const empty = "☆".repeat(4 - stars);
+  return `<span class="text-muted small" title="ClinVar review-status stars">ClinVar review ${escapeHtml(filled + empty)} (${stars}/4)</span>`;
+}
+
+function clinVarStarsText(row) {
+  if (String(row.source || "").toLowerCase() !== "clinvar") return "";
+  const value = Number(row.clinvar_stars ?? 0);
+  const stars = Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 4);
+  return `${"★".repeat(stars)}${"☆".repeat(4 - stars)} (${stars}/4)`;
 }
 
 function externalLinks(row) {
@@ -1106,7 +1127,7 @@ function renderResultsTable(rows) {
   <td><strong>${escapeHtml(row.gene)}</strong><br><span class="text-muted small">${escapeHtml(row.source_id || row.annotation_id)}</span></td>
   <td>${escapeHtml(row.name)}</td>
   <td><code>${escapeHtml(row.input_genotype || row.genotype_norm)}</code><br><span class="text-muted small">norm ${escapeHtml(row.genotype_norm)}</span></td>
-  <td>${escapeHtml(row.significance?.replaceAll("_", " "))}<br><span class="text-muted small">priority score ${escapeHtml(row.score)}</span></td>
+  <td>${escapeHtml(row.significance?.replaceAll("_", " "))}<br><span class="text-muted small">priority score ${escapeHtml(row.score)}</span><br>${clinVarStarsHtml(row)}</td>
   <td>
     <button class="btn btn-sm btn-outline-dark" type="button" data-bs-toggle="collapse" data-bs-target="#detail-all-${idx}">Details</button>
   </td>
@@ -1129,6 +1150,7 @@ function renderResultsTable(rows) {
               <dt class="col-5">Input locus</dt><dd class="col-7">${escapeHtml(row.input_chrom)}:${escapeHtml(row.input_pos)}</dd>
               <dt class="col-5">Alleles</dt><dd class="col-7">normal ${escapeHtml(row.normal_allele)} · risk/effect ${escapeHtml(row.risk_allele)}</dd>
               <dt class="col-5">Source</dt><dd class="col-7">${escapeHtml(row.source)}</dd>
+              <dt class="col-5">ClinVar review</dt><dd class="col-7">${escapeHtml(clinVarStarsText(row))}</dd>
               <dt class="col-5">PMIDs</dt><dd class="col-7">${escapeHtml(row.publications || "")}</dd>
             </dl>
             <div>${externalLinks(row)}</div>
@@ -1265,6 +1287,12 @@ function renderResults(summary, rows) {
           <label class="form-label" for="filter-significance">Significance</label>
           <select id="filter-significance" class="form-select">
             ${selectOptions(["", "pathogenic", "likely_pathogenic", "drug_response", "risk_factor", "association"], filters.significance, { "": "any" })}
+          </select>
+        </div>
+        <div class="col-lg-2">
+          <label class="form-label" for="filter-clinvar-stars">ClinVar stars</label>
+          <select id="filter-clinvar-stars" class="form-select">
+            ${selectOptions(["", "1", "2", "3", "4"], filters.minStars, { "": "any", "1": "≥1★", "2": "≥2★", "3": "≥3★", "4": "4★" })}
           </select>
         </div>
         <div class="col-lg-2">
@@ -1588,6 +1616,7 @@ function readResultFilters(offsetOverride = null) {
     category: byId("filter-category")?.value || "",
     significance: byId("filter-significance")?.value || "",
     risk: byId("filter-risk")?.value || "",
+    minStars: byId("filter-clinvar-stars")?.value || "",
     limit: byId("result-page-size")?.value || current.limit,
     offset: offsetOverride ?? 0,
   });
@@ -1666,7 +1695,7 @@ function bindResultControls() {
       const node = byId(id);
       if (node) node.value = "";
     });
-    ["filter-category", "filter-risk", "filter-significance"].forEach((id) => {
+    ["filter-category", "filter-risk", "filter-significance", "filter-clinvar-stars"].forEach((id) => {
       const node = byId(id);
       if (node) node.value = "";
     });
@@ -1694,6 +1723,7 @@ function bindResultControls() {
     byId("filter-category"),
     byId("filter-risk"),
     byId("filter-significance"),
+    byId("filter-clinvar-stars"),
     byId("result-page-size"),
   ].forEach((node) => node?.addEventListener("change", () => {
     applyResultFilters(readResultFilters(0));
