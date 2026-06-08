@@ -3,7 +3,7 @@
     <div>
       <h2 class="h5 mb-1">Advanced local tools</h2>
       <p class="text-muted small mb-0">
-        These are separate helper workflows from the main annotation run. Files and URL downloads are staged only inside the browser webR filesystem.
+        These helper workflows are separate from annotation. Files and URL downloads are staged only inside the browser webR filesystem.
       </p>
     </div>
     <span class="badge text-bg-light">Loaded on demand</span>
@@ -12,7 +12,7 @@
   <ul class="nav nav-tabs" id="advanced-tools-tabs" role="tablist">
     <li class="nav-item" role="presentation">
       <button class="nav-link active" id="liftover-tool-tab" data-bs-toggle="tab" data-bs-target="#liftover-tool-pane" type="button" role="tab">
-        VCF/BCF liftover assets
+        VCF/BCF liftover
       </button>
     </li>
     <li class="nav-item" role="presentation">
@@ -20,22 +20,30 @@
         23andMe to VCF guidance
       </button>
     </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="litvar2-tool-tab" data-bs-toggle="tab" data-bs-target="#litvar2-tool-pane" type="button" role="tab">
-        LitVar2 lookup
-      </button>
-    </li>
   </ul>
 
   <div class="tab-content border border-top-0 p-3 bg-white">
     <div class="tab-pane fade show active" id="liftover-tool-pane" role="tabpanel" aria-labelledby="liftover-tool-tab">
-      <h3 class="h6">VCF/BCF liftover inputs</h3>
+      <h3 class="h6">Convert a VCF/BCF to another build</h3>
       <p class="text-muted small mb-3">
-        If the uploaded VCF/BCF build differs from the analysis bundle, DuckGeneSnap can call
-        <code>bcftools_liftover()</code> in Rduckhts. Provide a chain file plus source and destination FASTA files,
-        either as local files or HTTPS URLs that allow browser CORS downloads.
+        Upload a VCF/BCF plus chain, source FASTA, and destination FASTA assets. DuckGeneSnap will run the Rduckhts
+        <code>bcftools_liftover()</code> row kernel locally and download a lifted variant table. Upload the lifted output to the main annotation workflow when builds match.
       </p>
       <div class="row g-3">
+        <div class="col-lg-4">
+          <label class="form-label" for="liftover-input-file">Input VCF/BCF</label>
+          <input class="form-control" id="liftover-input-file" type="file" accept=".vcf,.bcf,.gz" />
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="liftover-output-format">Download format</label>
+          <select class="form-select" id="liftover-output-format">
+            <option value="tsv" selected>Lifted TSV</option>
+            <option value="parquet">Lifted Parquet</option>
+          </select>
+        </div>
+        <div class="col-lg-4 d-flex align-items-end">
+          <button class="btn btn-outline-primary" id="liftover-run-button" type="button">Run liftover and download</button>
+        </div>
         <div class="col-lg-4">
           <label class="form-label" for="chain-file">Chain file</label>
           <input class="form-control mb-2" id="chain-file" type="file" accept=".chain,.gz" />
@@ -52,12 +60,13 @@
           <input class="form-control" id="dst-ref-url" type="url" placeholder="https://.../destination.fa.gz" />
         </div>
       </div>
+      <div class="small mt-3" id="liftover-tool-status">Liftover status will appear here.</div>
       <p class="small text-muted mt-3 mb-0">
         UCSC chain files are commonly available under
         <a href="https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/" target="_blank" rel="noopener">hg19 liftOver</a>
         and
         <a href="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/" target="_blank" rel="noopener">hg38 liftOver</a>.
-        Use the same source FASTA used to call the VCF and the matching destination reference; whole-genome FASTA URLs can be large and may fail if the host blocks CORS.
+        Use the same source FASTA used to call the VCF and the matching destination reference. Whole-genome FASTA URLs can be large and may fail if the host blocks CORS.
       </p>
     </div>
 
@@ -72,27 +81,6 @@
         <li>Use a trusted local converter or pipeline that records REF/ALT and preserves no-calls.</li>
         <li>Then upload the VCF/BCF here so DuckGeneSnap can filter called alternate genotypes and compute VariantKeys.</li>
       </ul>
-    </div>
-
-    <div class="tab-pane fade" id="litvar2-tool-pane" role="tabpanel" aria-labelledby="litvar2-tool-tab">
-      <h3 class="h6">LitVar2 live literature lookup</h3>
-      <p class="small text-muted">
-        Query NCBI/NLM LitVar2 from the browser for rsIDs, variant names, or genes. If NCBI does not allow CORS for the current origin, DuckGeneSnap will show direct LitVar2 links instead of silently failing.
-      </p>
-      <div class="row g-2 align-items-end">
-        <div class="col-lg-7">
-          <label class="form-label" for="litvar2-query">Variant or gene query</label>
-          <input class="form-control" id="litvar2-query" type="search" placeholder="rs6025, F5, Factor V Leiden..." />
-        </div>
-        <div class="col-lg-5 d-flex flex-wrap gap-2">
-          <button class="btn btn-outline-primary" id="litvar2-search-button" type="button">Search LitVar2 API</button>
-          <a class="btn btn-outline-secondary" id="litvar2-open-link" href="https://www.ncbi.nlm.nih.gov/research/litvar2/" target="_blank" rel="noopener">Open LitVar2</a>
-        </div>
-      </div>
-      <div class="small mt-3" id="litvar2-results">Enter a query to search LitVar2.</div>
-      <p class="small text-muted mt-3 mb-0">
-        LitVar2 is an NIH/NLM research tool and is not intended for direct diagnostic use or medical decision-making without clinical professional review.
-      </p>
     </div>
   </div>
 </div>

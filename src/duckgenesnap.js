@@ -62,7 +62,6 @@ function initNodes() {
     "input-kind",
     "input-build",
     "analysis-build",
-    "liftover-mode",
     "vcf-record-filter",
     "chain-file",
     "chain-url",
@@ -738,7 +737,7 @@ FROM user_variants_raw
 
   if (needsLiftover) {
     if (liftoverMode === "off") {
-      throw new Error("Input build differs from the analysis build. Enable liftover or choose the matching analysis build.");
+      throw new Error("Input build differs from the analysis build. Use Advanced local tools > VCF/BCF liftover to create a converted file, then upload that converted VCF/BCF for annotation.");
     }
     const chainPath = await stageLiftoverAsset("chain-file", "chain-url", "chain");
     const srcRefPath = await stageLiftoverAsset("src-ref-file", "src-ref-url", "src_ref");
@@ -1023,6 +1022,10 @@ SELECT
   count(*) FILTER (WHERE category = 'uncertain')::BIGINT AS uncertain_count,
   count(*) FILTER (WHERE risk_level = 'high_risk')::BIGINT AS high_risk_count
 FROM analysis_matches
+`);
+  const filteredRows = await queryJson(`
+SELECT count(*)::BIGINT AS filtered_count
+FROM analysis_matches
 ${whereSql}
 `);
   const rows = await queryJson(`
@@ -1034,15 +1037,21 @@ LIMIT ${f.limit}
 OFFSET ${f.offset}
 `);
   const summary = summaryRows[0] || {};
-  const total = Number(summary.total_variants_found || 0);
-  if (f.offset >= total && total > 0) {
-    f.offset = Math.max(total - f.limit, 0);
+  const filteredCount = Number(filteredRows[0]?.filtered_count || 0);
+  if (f.offset >= filteredCount && filteredCount > 0) {
+    f.offset = Math.max(filteredCount - f.limit, 0);
     return collectResults(context, f);
   }
   state.currentSearch = f.search;
   state.resultFilters = f;
   state.lastRows = rows;
-  state.lastSummary = { ...summary, ...context, filters: f, searchText: f.search };
+  state.lastSummary = {
+    ...summary,
+    ...context,
+    filters: f,
+    searchText: f.search,
+    filtered_count: filteredCount,
+  };
   return { summary: state.lastSummary, rows };
 }
 
@@ -1162,6 +1171,12 @@ function renderResultsTable(rows) {
               <dt class="col-5">PMIDs</dt><dd class="col-7">${escapeHtml(row.publications || "")}</dd>
             </dl>
             <div>${externalLinks(row)}</div>
+            <hr />
+            <h6>LitVar2 literature</h6>
+            <p class="small text-muted mb-2">Open NCBI/NLM LitVar2 for this row, or try the API from the browser if CORS permits it.</p>
+            <button class="btn btn-sm btn-outline-primary litvar2-row-button" type="button" data-litvar2-query="${escapeHtml(/^rs\d+$/i.test(row.source_id || "") ? row.source_id : row.gene || row.source_id || row.annotation_id)}" data-litvar2-target="litvar2-row-${idx}">Try LitVar2 API</button>
+            <span class="small ms-2">${litVar2Links(/^rs\d+$/i.test(row.source_id || "") ? row.source_id : row.gene || row.source_id || row.annotation_id)}</span>
+            <div class="small mt-2" id="litvar2-row-${idx}"></div>
           </div>
         </div>
       </div>
@@ -1240,9 +1255,10 @@ function renderTable(rows, category) {
 
 function renderResults(summary, rows) {
   const total = Number(summary.total_variants_found || 0);
+  const filteredCount = Number(summary.filtered_count ?? total);
   const filters = normalizeResultFilters(summary.filters || state.resultFilters);
-  const pageStart = total ? filters.offset + 1 : 0;
-  const pageEnd = Math.min(filters.offset + rows.length, total);
+  const pageStart = filteredCount ? filters.offset + 1 : 0;
+  const pageEnd = Math.min(filters.offset + rows.length, filteredCount);
 
   nodes.results.innerHTML = `
 <section class="my-4">
@@ -1258,7 +1274,7 @@ function renderResults(summary, rows) {
   </div>
 
   <div class="row g-3 mb-4">
-    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Curated matches${summary.searchText ? " shown" : ""}</div><div class="display-6">${total.toLocaleString()}</div><div class="small text-muted">Rows ${pageStart.toLocaleString()}-${pageEnd.toLocaleString()}</div></div></div></div>
+    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Curated matches</div><div class="display-6">${total.toLocaleString()}</div><div class="small text-muted">Filtered rows ${pageStart.toLocaleString()}-${pageEnd.toLocaleString()} of ${filteredCount.toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">High risk</div><div class="display-6 text-danger">${Number(summary.high_risk_count || 0).toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Health</div><div class="display-6">${Number(summary.health_risk_count || 0).toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Pharma + traits</div><div class="display-6">${(Number(summary.pharmacogenomics_count || 0) + Number(summary.trait_count || 0)).toLocaleString()}</div><div class="small text-muted">Uncertain ${Number(summary.uncertain_count || 0).toLocaleString()}</div></div></div></div>
@@ -1320,7 +1336,7 @@ function renderResults(summary, rows) {
           <button id="result-search-button" type="button" class="btn btn-outline-primary">Apply filters</button>
           <button id="result-clear-search" type="button" class="btn btn-outline-secondary">Clear</button>
           <button id="result-prev-page" type="button" class="btn btn-outline-secondary" ${filters.offset <= 0 ? "disabled" : ""}>Previous</button>
-          <button id="result-next-page" type="button" class="btn btn-outline-secondary" ${pageEnd >= total ? "disabled" : ""}>Next</button>
+          <button id="result-next-page" type="button" class="btn btn-outline-secondary" ${pageEnd >= filteredCount ? "disabled" : ""}>Next</button>
         </div>
         <div class="col-lg-4 d-flex gap-2 justify-content-lg-end">
           <select id="export-format" class="form-select w-auto" aria-label="Export format">
@@ -1332,7 +1348,7 @@ function renderResults(summary, rows) {
           <button id="download-button" type="button" class="btn btn-outline-success" ${total ? "" : "disabled"}>Export filtered</button>
         </div>
       </div>
-      <div class="form-text mt-2">Filters, paging, and export query the browser DuckDB <code>analysis_matches</code> table. The table below shows only the current page, not the full match set.</div>
+      <div class="form-text mt-2">Summary cards are global for this analysis run. Filters, paging, and export query the browser DuckDB <code>analysis_matches</code> table; the table below shows only the current page, not the full match set.</div>
     </div>
   </div>
 
@@ -1381,7 +1397,7 @@ async function analyzeSelectedFile(file) {
         file,
         inputBuild,
         analysisBuild,
-        nodes["liftover-mode"].value,
+        "off",
         nodes["vcf-record-filter"].value,
       );
 
@@ -1552,11 +1568,7 @@ ${geneHtml}
 <p class="small text-muted mt-3 mb-0">${litVar2Links(query, firstId)}</p>`;
 }
 
-async function runLitVar2Search() {
-  const input = byId("litvar2-query");
-  const output = byId("litvar2-results");
-  const openLink = byId("litvar2-open-link");
-  const query = input?.value?.trim() || "";
+async function runLitVar2Query(query, output, openLink = null) {
   if (!output) return;
   if (!query) {
     output.innerHTML = `<div class="alert alert-warning small mb-0">Enter an rsID, variant name, or gene.</div>`;
@@ -1609,6 +1621,144 @@ async function runLitVar2Search() {
   }
 
   output.innerHTML = renderLitVar2Results({ query, errors, ...results });
+}
+
+async function runLitVar2Search() {
+  const input = byId("litvar2-query");
+  await runLitVar2Query(
+    input?.value?.trim() || "",
+    byId("litvar2-results"),
+    byId("litvar2-open-link"),
+  );
+}
+
+async function runLiftoverTool() {
+  const status = byId("liftover-tool-status");
+  const input = byId("liftover-input-file")?.files?.[0];
+  if (!status) return;
+  if (!input) {
+    status.innerHTML = `<div class="alert alert-warning small mb-0">Choose an input VCF/BCF first.</div>`;
+    return;
+  }
+  status.innerHTML = `<div class="text-muted small"><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Preparing liftover...</div>`;
+  try {
+    if (!state.backend.ready) await warmBackend();
+    const inputPath = `${VFS_UPLOAD}/liftover_${sanitizeFilename(input.name, "input.vcf")}`;
+    await writeBrowserFile(input, inputPath);
+    const chainPath = await stageLiftoverAsset("chain-file", "chain-url", "chain");
+    const srcRefPath = await stageLiftoverAsset("src-ref-file", "src-ref-url", "src_ref");
+    const dstRefPath = await stageLiftoverAsset("dst-ref-file", "dst-ref-url", "dst_ref");
+    if (!chainPath || !srcRefPath || !dstRefPath) {
+      throw new Error("Liftover requires chain, source FASTA, and destination FASTA files or URLs.");
+    }
+
+    await runTimedStep({
+      label: "Read liftover VCF/BCF",
+      detail: "Reading the input VCF/BCF with Rduckhts.",
+      successSummary: "Input variants are loaded",
+      failureSummary: "Could not read liftover input",
+    }, async () => {
+      await runR(`Rduckhts::rduckhts_bcf(con, 'liftover_input_raw', ${rString(inputPath)}, tidy_format = TRUE, overwrite = TRUE)`);
+    });
+    const schema = await queryJson(`DESCRIBE ${sqlIdentifier("liftover_input_raw")}`);
+    const raw = vcfColumnExpressions(schema);
+
+    await runTimedStep({
+      label: "Run VCF/BCF liftover",
+      detail: "Applying bcftools_liftover to concrete single-ALT records.",
+      successSummary: "Liftover table is ready",
+      failureSummary: "Could not run liftover",
+    }, async () => {
+      await executeSql(`
+CREATE OR REPLACE TABLE liftover_results AS
+WITH input_rows AS (
+  SELECT
+    ${raw.sampleSql} AS sample_id,
+    ${raw.gtSql} AS gt,
+    ${raw.chromSql} AS input_chrom,
+    ${raw.posSql} AS input_pos,
+    ${raw.refSql} AS input_ref,
+    ${raw.altSql} AS input_alt,
+    ${raw.altCountSql} AS alt_count
+  FROM liftover_input_raw
+), filtered AS (
+  SELECT *
+  FROM input_rows
+  WHERE input_chrom IS NOT NULL
+    AND input_pos IS NOT NULL
+    AND input_ref IS NOT NULL
+    AND input_alt IS NOT NULL
+    AND alt_count = 1
+    AND NOT contains(input_alt, ',')
+    AND regexp_matches(upper(input_ref), '^[ACGT]+$')
+    AND regexp_matches(upper(input_alt), '^[ACGT]+$')
+), lifted AS (
+  SELECT
+    *,
+    bcftools_liftover(
+      input_chrom,
+      input_pos,
+      input_ref,
+      input_alt,
+      ${sqlString(chainPath)},
+      ${sqlString(dstRefPath)},
+      ${sqlString(srcRefPath)},
+      1,
+      250,
+      false,
+      NULL::BIGINT,
+      false
+    ) AS lo
+  FROM filtered
+)
+SELECT
+  sample_id,
+  gt,
+  input_chrom,
+  input_pos,
+  input_ref,
+  input_alt,
+  lo.dest_chrom::VARCHAR AS chrom,
+  lo.dest_pos::BIGINT AS pos,
+  lo.dest_ref::VARCHAR AS ref,
+  lo.dest_alt::VARCHAR AS alt,
+  lo.mapped AS mapped,
+  lo.reverse_complemented AS reverse_complemented,
+  lo.swap AS swapped,
+  lo.reject_reason::VARCHAR AS reject_reason,
+  lo.note::VARCHAR AS note
+FROM lifted
+`);
+    });
+
+    const counts = await queryJson(`
+SELECT
+  (SELECT count(*) FROM liftover_input_raw)::BIGINT AS raw_records,
+  (SELECT count(*) FROM liftover_results)::BIGINT AS lifted_records,
+  count(*) FILTER (WHERE mapped)::BIGINT AS mapped_records,
+  count(*) FILTER (WHERE NOT mapped)::BIGINT AS rejected_records
+FROM liftover_results
+`);
+    const format = byId("liftover-output-format")?.value || "tsv";
+    const ext = format === "parquet" ? "parquet" : "tsv";
+    const outputPath = `${VFS_ROOT}/duckgenesnap_liftover_${Date.now()}.${ext}`;
+    const copyOptions = format === "parquet"
+      ? "FORMAT PARQUET, COMPRESSION ZSTD"
+      : "HEADER, DELIMITER '\t'";
+    await executeSql(`COPY (SELECT * FROM liftover_results ORDER BY input_chrom, input_pos) TO ${sqlString(outputPath)} (${copyOptions})`);
+    const bytes = await state.backend.webR.FS.readFile(outputPath);
+    downloadBlob(
+      new Blob([bytes], {
+        type: format === "parquet" ? "application/vnd.apache.parquet" : "text/tab-separated-values;charset=utf-8",
+      }),
+      `duckgenesnap_liftover.${ext}`,
+    );
+    const c = counts[0] || {};
+    status.innerHTML = `<div class="alert alert-success small mb-0">Downloaded lifted ${escapeHtml(ext.toUpperCase())}: ${Number(c.raw_records || 0).toLocaleString()} raw records, ${Number(c.lifted_records || 0).toLocaleString()} concrete records, ${Number(c.mapped_records || 0).toLocaleString()} mapped, ${Number(c.rejected_records || 0).toLocaleString()} rejected.</div>`;
+  } catch (error) {
+    console.error(error);
+    status.innerHTML = `<div class="alert alert-danger small mb-0">${escapeHtml(error.message || String(error))}</div>`;
+  }
 }
 
 function downloadBlob(blob, filename) {
@@ -1750,6 +1900,14 @@ function bindResultControls() {
   ].forEach((node) => node?.addEventListener("change", () => {
     applyResultFilters(readResultFilters(0));
   }));
+  document.querySelectorAll(".litvar2-row-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      runLitVar2Query(
+        button.dataset.litvar2Query || "",
+        byId(button.dataset.litvar2Target || ""),
+      );
+    });
+  });
   byId("download-button")?.addEventListener("click", exportResults);
 }
 
@@ -1776,17 +1934,12 @@ async function loadDemo() {
   await analyzeSelectedFile(file);
 }
 
-function updateLiftoverVisibility() {
-  const tools = byId("advanced-tools");
-  if (!tools) return;
-  if (nodes["liftover-mode"].value !== "off") {
-    tools.classList.add("border-primary");
-  } else {
-    tools.classList.remove("border-primary");
-  }
-}
-
 function bindAdvancedTools() {
+  const liftoverButton = byId("liftover-run-button");
+  if (liftoverButton && !liftoverButton.dataset.bound) {
+    liftoverButton.dataset.bound = "true";
+    liftoverButton.addEventListener("click", runLiftoverTool);
+  }
   const button = byId("litvar2-search-button");
   const input = byId("litvar2-query");
   if (button && !button.dataset.bound) {
@@ -1825,7 +1978,6 @@ function bindEvents() {
     }
   });
   nodes["reset-button"].addEventListener("click", resetUi);
-  nodes["liftover-mode"].addEventListener("change", updateLiftoverVisibility);
   document.body.addEventListener("htmx:afterSwap", bindAdvancedTools);
   document.body.addEventListener("shown.bs.collapse", bindAdvancedTools);
 }
@@ -1833,7 +1985,6 @@ function bindEvents() {
 async function main() {
   initNodes();
   bindEvents();
-  updateLiftoverVisibility();
   resetUi();
   try {
     await populateBuildSelectors();

@@ -31,21 +31,25 @@ server.
 - Configurable Parquet row group size and compression level.
 - Auxiliary `variant_keys` table for allele-aware display, QA, and
   future exact-key refinement.
-- Optional VCF/BCF liftover hook using `bcftools_liftover()` when chain
-  and FASTA files are supplied by the user.
+- Separate advanced VCF/BCF liftover helper using `bcftools_liftover()`:
+  users upload the VCF/BCF plus chain/source FASTA/destination FASTA
+  assets there, download lifted TSV/Parquet output, then upload the
+  converted file for annotation.
 - DuckBedQC-style step timing modal and per-run timing table.
 - Searchable, paged, scrollable result tables backed by browser DuckDB,
   with column filters, ClinVar review-status stars, plus TSV, CSV, Excel
-  `.xlsx`, and Parquet exports near the result table.
+  `.xlsx`, and Parquet exports near the result table. Summary cards
+  remain global for the analysis run; filters only change the current
+  table page.
 - VCF/gVCF record filtering defaults to called alternate variants only,
   which skips gVCF reference blocks, symbolic alleles, hom-ref
   genotypes, and no-calls. VCF/BCF annotation matches require an exact
   allele `variant_key` match when an annotation has REF/ALT alleles, so
   same-locus different-allele calls are not reported as hits.
 - Collapsed HTMX-loaded advanced helper workflows, including VCF/BCF
-  liftover inputs, 23andMe-to-VCF guidance, and live NCBI/NLM LitVar2
-  lookup links/API calls when browser CORS permits them; core
-  computation remains in the local DuckDB/webR layer.
+  liftover conversion and 23andMe-to-VCF guidance. LitVar2 lookup
+  links/API attempts live in each variant detail panel instead of a
+  separate global lookup tool.
 - Demo 23andMe-style file at `public/demo/example_23andme.txt`. For
   serious allele-aware work, prefer converting chip text to VCF/BCF with
   trusted local build metadata before upload.

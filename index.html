@@ -92,13 +92,6 @@
 
             <div class="row g-3 align-items-end">
               <div class="col-md-4">
-                <label for="liftover-mode" class="form-label">VCF/BCF liftover</label>
-                <select id="liftover-mode" class="form-select">
-                  <option value="off">off</option>
-                  <option value="auto">auto when builds differ</option>
-                </select>
-              </div>
-              <div class="col-md-4">
                 <label for="vcf-record-filter" class="form-label">VCF/gVCF record filter</label>
                 <select id="vcf-record-filter" class="form-select">
                   <option value="called_alt" selected>called alternate variants only</option>
@@ -147,7 +140,7 @@
           <div class="card-header bg-white d-flex justify-content-between align-items-center gap-2">
             <div>
               <h2 class="h5 mb-0">Advanced local tools</h2>
-              <div class="small text-muted">Optional liftover, chip-to-VCF guidance, and LitVar2 lookups.</div>
+              <div class="small text-muted">Optional liftover conversion and chip-to-VCF guidance.</div>
             </div>
             <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#advanced-tools-body" aria-expanded="false" aria-controls="advanced-tools-body">
               Show tools
