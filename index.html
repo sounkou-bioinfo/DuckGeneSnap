@@ -22,6 +22,8 @@
     .hero-card { background: linear-gradient(135deg, #eef2ff, #ecfeff); }
     .feature-icon { font-size: 2.25rem; color: #1d4ed8; }
     .timing-list { max-height: 16rem; overflow-y: auto; }
+    .results-scroll { max-height: 70vh; overflow: auto; }
+    .results-scroll thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
     code { color: #0f172a; }
     table { font-size: 0.95rem; }
     .collapse-row:hover { --bs-table-hover-bg: transparent; }
@@ -96,6 +98,13 @@
                   <option value="auto">auto when builds differ</option>
                 </select>
               </div>
+              <div class="col-md-4">
+                <label for="vcf-record-filter" class="form-label">VCF/gVCF record filter</label>
+                <select id="vcf-record-filter" class="form-select">
+                  <option value="called_alt" selected>called alternate variants only</option>
+                  <option value="all_concrete">all concrete REF/ALT records</option>
+                </select>
+              </div>
               <div class="col-md-8 d-flex flex-wrap gap-2">
                 <button id="analyze-button" type="button" class="btn btn-primary btn-lg">Analyze locally</button>
                 <button id="demo-button" type="button" class="btn btn-outline-dark btn-lg">Load demo 23andMe</button>
@@ -134,8 +143,19 @@
           </div>
         </div>
 
-        <section class="card mt-4" id="advanced-tools" hx-get="public/fragments/advanced_tools.html" hx-trigger="load" hx-swap="innerHTML">
-          <div class="card-body text-muted small">Loading advanced local tools...</div>
+        <section class="card mt-4" id="advanced-tools">
+          <div class="card-header bg-white d-flex justify-content-between align-items-center gap-2">
+            <div>
+              <h2 class="h5 mb-0">Advanced local tools</h2>
+              <div class="small text-muted">Optional liftover, chip-to-VCF guidance, and LitVar2 lookups.</div>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#advanced-tools-body" aria-expanded="false" aria-controls="advanced-tools-body">
+              Show tools
+            </button>
+          </div>
+          <div class="collapse" id="advanced-tools-body" hx-get="public/fragments/advanced_tools.html" hx-trigger="load" hx-swap="innerHTML">
+            <div class="card-body text-muted small">Loading advanced local tools...</div>
+          </div>
         </section>
       </div>
     </section>
@@ -177,7 +197,7 @@
     </aside>
   </main>
 
-  <div class="modal fade" id="operation-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal" id="operation-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-body p-4">

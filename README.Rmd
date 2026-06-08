@@ -42,10 +42,14 @@ queried locally. No genotype data is uploaded to a server.
 - Optional VCF/BCF liftover hook using `bcftools_liftover()` when chain and
   FASTA files are supplied by the user.
 - DuckBedQC-style step timing modal and per-run timing table.
-- Searchable result tables backed by browser DuckDB, with TSV, CSV,
-  Excel `.xlsx`, and Parquet exports near the result table.
-- HTMX fragments for advanced helper workflows, including VCF/BCF liftover
-  inputs and 23andMe-to-VCF guidance; computation remains in the local
+- Searchable, paged, scrollable result tables backed by browser DuckDB, with
+  column filters plus TSV, CSV, Excel `.xlsx`, and Parquet exports near the
+  result table.
+- VCF/gVCF record filtering defaults to called alternate variants only, which
+  skips gVCF reference blocks, symbolic alleles, hom-ref genotypes, and no-calls.
+- Collapsed HTMX-loaded advanced helper workflows, including VCF/BCF liftover
+  inputs, 23andMe-to-VCF guidance, and live NCBI/NLM LitVar2 lookup links/API
+  calls when browser CORS permits them; core computation remains in the local
   DuckDB/webR layer.
 - Demo 23andMe-style file at `public/demo/example_23andme.txt`. For serious
   allele-aware work, prefer converting chip text to VCF/BCF with trusted local
@@ -197,6 +201,11 @@ frontend-only query orchestration in Sasha Gusev's GWAS Lookup:
 (client-side modules, URL-stateable variant queries, parallel enrichment panels)
 but uses local DuckDB/Rduckhts assets first and calls external APIs only for
 on-demand detail enrichment.
+
+LitVar2 lookups use the public NCBI/NLM LitVar2 API where browser CORS permits
+it, with direct fallback links to the LitVar2 website. LitVar2 is an NIH/NLM
+research tool and is not intended for direct diagnostic use or medical
+decision-making without clinical professional review.
 
 ## Related projects
 

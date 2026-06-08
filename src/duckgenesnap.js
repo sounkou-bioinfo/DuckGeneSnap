@@ -2,6 +2,8 @@ import { WebR } from "https://webr.r-wasm.org/latest/webr.mjs";
 
 const DATA_BASE = "public/data";
 const DEMO_23ANDME = "public/demo/example_23andme.txt";
+const LITVAR2_API_BASE = "https://www.ncbi.nlm.nih.gov/research/litvar2-api";
+const LITVAR2_SITE_BASE = "https://www.ncbi.nlm.nih.gov/research/litvar2";
 const VFS_ROOT = "/duckgenesnap";
 const VFS_DATA = `${VFS_ROOT}/data`;
 const VFS_UPLOAD = `${VFS_ROOT}/upload`;
@@ -20,6 +22,7 @@ const state = {
   lastRows: [],
   lastSummary: null,
   currentSearch: "",
+  resultFilters: {},
   timings: [],
   operation: {
     modal: null,
@@ -60,6 +63,7 @@ function initNodes() {
     "input-build",
     "analysis-build",
     "liftover-mode",
+    "vcf-record-filter",
     "chain-file",
     "chain-url",
     "src-ref-file",
@@ -170,7 +174,25 @@ function renderTimingList(active = null) {
     : "Step timings appear here after analysis starts.";
 }
 
+function forceHideOperation() {
+  const op = state.operation.active;
+  if (op?.timerId) clearInterval(op.timerId);
+  state.operation.active = null;
+  state.operation.modal?.hide();
+  const modalNode = nodes["operation-modal"];
+  if (modalNode) {
+    modalNode.classList.remove("show");
+    modalNode.style.display = "none";
+    modalNode.setAttribute("aria-hidden", "true");
+  }
+  document.querySelectorAll(".modal-backdrop").forEach((node) => node.remove());
+  document.body.classList.remove("modal-open");
+  document.body.style.removeProperty("overflow");
+  document.body.style.removeProperty("padding-right");
+}
+
 function resetTimings() {
+  forceHideOperation();
   state.timings = [];
   if (nodes["timing-card"]) nodes["timing-card"].hidden = false;
   renderTimingList();
@@ -192,8 +214,7 @@ function refreshOperationElapsed() {
 }
 
 function beginOperation({ label, detail }) {
-  const current = state.operation.active;
-  if (current?.timerId) clearInterval(current.timerId);
+  forceHideOperation();
   const op = {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
     label,
@@ -251,9 +272,8 @@ async function finishOperation(operationId, { success, summary }) {
       : "bi bi-exclamation-triangle-fill text-danger me-3 mt-1";
   }
   recordTiming(op.label, summary, durationMs, success);
-  await sleep(success ? 250 : 900);
-  state.operation.modal?.hide();
-  state.operation.active = null;
+  await sleep(success ? 150 : 900);
+  forceHideOperation();
   renderTimingList();
   return durationMs;
 }
@@ -675,7 +695,7 @@ CASE
 END`;
 }
 
-async function analyzeVcfBcf(file, inputBuild, analysisBuild, liftoverMode) {
+async function analyzeVcfBcf(file, inputBuild, analysisBuild, liftoverMode, recordFilter) {
   const filePath = `${VFS_UPLOAD}/${sanitizeFilename(file.name, "upload.vcf")}`;
   await runTimedStep({
     label: "Read VCF/BCF",
@@ -690,6 +710,10 @@ async function analyzeVcfBcf(file, inputBuild, analysisBuild, liftoverMode) {
   const rawSchema = await queryJson(`DESCRIBE ${sqlIdentifier("user_variants_raw")}`);
   const raw = vcfColumnExpressions(rawSchema);
   const needsLiftover = inputBuild !== analysisBuild;
+  const calledAltOnly = recordFilter !== "all_concrete";
+  const calledAltCondition = calledAltOnly
+    ? "AND (NOT has_gt OR coalesce(regexp_matches(gt, '(^|[/|])([1-9][0-9]*)([/|]|$)'), false))"
+    : "";
   let sourceSql = `
 SELECT
   ${raw.sampleSql} AS sample_id,
@@ -798,10 +822,7 @@ WITH filtered AS (
     AND NOT contains(alt, ',')
     AND regexp_matches(upper(ref), '^[ACGT]+$')
     AND regexp_matches(upper(alt), '^[ACGT]+$')
-    AND (
-      NOT has_gt
-      OR coalesce(regexp_matches(gt, '(^|[/|])([1-9][0-9]*)([/|]|$)'), false)
-    )
+    ${calledAltCondition}
 ), gt_parts AS (
   SELECT
     *,
@@ -913,37 +934,74 @@ SELECT
       AND NOT contains(alt, ',')
       AND regexp_matches(upper(ref), '^[ACGT]+$')
       AND regexp_matches(upper(alt), '^[ACGT]+$')
-      AND NOT coalesce(regexp_matches(gt, '(^|[/|])([1-9][0-9]*)([/|]|$)'), false)
+      AND ${calledAltOnly ? "NOT coalesce(regexp_matches(gt, '(^|[/|])([1-9][0-9]*)([/|]|$)'), false)" : "FALSE"}
   )::BIGINT AS skipped_non_alt_gt,
   (SELECT count(*) FROM user_variant_keyed)::BIGINT AS keyed_records,
   (SELECT count(*) FROM analysis_matches)::BIGINT AS matched_records
 `);
-  return { stats: keyedStats[0] || {}, inputKind: "VCF/BCF" };
+  return {
+    stats: { ...(keyedStats[0] || {}), record_filter: recordFilter },
+    inputKind: "VCF/BCF",
+  };
+}
+
+function normalizeResultFilters(filters = {}) {
+  return {
+    search: String(filters.search || "").trim(),
+    gene: String(filters.gene || "").trim(),
+    source: String(filters.source || "").trim(),
+    category: String(filters.category || "").trim(),
+    significance: String(filters.significance || "").trim(),
+    risk: String(filters.risk || "").trim(),
+    limit: Math.min(Math.max(Number(filters.limit || 250), 25), 1000),
+    offset: Math.max(Number(filters.offset || 0), 0),
+  };
+}
+
+function likeCondition(column, value) {
+  const term = String(value || "").trim();
+  if (!term) return null;
+  return `lower(coalesce(${column}, '')) LIKE ${sqlString(`%${term.toLowerCase()}%`)}`;
+}
+
+function resultFiltersWhere(filters = {}) {
+  const f = normalizeResultFilters(filters);
+  const conditions = [];
+  if (f.search) {
+    const pattern = sqlString(`%${f.search.toLowerCase()}%`);
+    conditions.push(`lower(
+      coalesce(gene, '') || ' ' ||
+      coalesce(source_id, '') || ' ' ||
+      coalesce(annotation_id, '') || ' ' ||
+      coalesce(name, '') || ' ' ||
+      coalesce(significance, '') || ' ' ||
+      coalesce(category, '') || ' ' ||
+      coalesce(source, '') || ' ' ||
+      coalesce(input_genotype, '') || ' ' ||
+      coalesce(genotype_norm, '')
+    ) LIKE ${pattern}`);
+  }
+  [
+    likeCondition("gene", f.gene),
+    likeCondition("source_id || ' ' || annotation_id", f.source),
+  ].filter(Boolean).forEach((condition) => conditions.push(condition));
+  if (f.category) conditions.push(`category = ${sqlString(f.category)}`);
+  if (f.significance) conditions.push(`significance = ${sqlString(f.significance)}`);
+  if (f.risk) conditions.push(`risk_level = ${sqlString(f.risk)}`);
+  return conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 }
 
 function resultSearchWhere(searchText = "") {
-  const term = String(searchText || "").trim();
-  if (!term) return "";
-  const pattern = sqlString(`%${term.toLowerCase()}%`);
-  return `WHERE lower(
-    coalesce(gene, '') || ' ' ||
-    coalesce(source_id, '') || ' ' ||
-    coalesce(annotation_id, '') || ' ' ||
-    coalesce(name, '') || ' ' ||
-    coalesce(significance, '') || ' ' ||
-    coalesce(category, '') || ' ' ||
-    coalesce(source, '') || ' ' ||
-    coalesce(input_genotype, '') || ' ' ||
-    coalesce(genotype_norm, '')
-  ) LIKE ${pattern}`;
+  return resultFiltersWhere({ ...state.resultFilters, search: searchText });
 }
 
 function resultOrderSql() {
   return `${buildRiskOrderSql()}, score DESC, category, gene, annotation_id`;
 }
 
-async function collectResults(context, searchText = "") {
-  const whereSql = resultSearchWhere(searchText);
+async function collectResults(context, filters = {}) {
+  const f = normalizeResultFilters(filters);
+  const whereSql = resultFiltersWhere(f);
   const summaryRows = await queryJson(`
 SELECT
   count(*)::BIGINT AS total_variants_found,
@@ -959,12 +1017,19 @@ SELECT *
 FROM analysis_matches
 ${whereSql}
 ORDER BY ${resultOrderSql()}
-LIMIT 1000
+LIMIT ${f.limit}
+OFFSET ${f.offset}
 `);
   const summary = summaryRows[0] || {};
-  state.currentSearch = String(searchText || "").trim();
+  const total = Number(summary.total_variants_found || 0);
+  if (f.offset >= total && total > 0) {
+    f.offset = Math.max(total - f.limit, 0);
+    return collectResults(context, f);
+  }
+  state.currentSearch = f.search;
+  state.resultFilters = f;
   state.lastRows = rows;
-  state.lastSummary = { ...summary, ...context, searchText: state.currentSearch };
+  state.lastSummary = { ...summary, ...context, filters: f, searchText: f.search };
   return { summary: state.lastSummary, rows };
 }
 
@@ -994,7 +1059,10 @@ function renderStats(summary) {
   if (summary.inputKind === "23andMe") {
     return `${Number(stats.parsed_snps || 0).toLocaleString()} SNP rows parsed; ${Number(stats.skipped_no_call || 0).toLocaleString()} no-calls skipped.`;
   }
-  return `${Number(stats.raw_records || 0).toLocaleString()} raw records; ${Number(stats.keyed_records || 0).toLocaleString()} called alternate VariantKey rows; ${Number(stats.matched_records || 0).toLocaleString()} curated matches; ${Number(stats.skipped_non_alt_gt || 0).toLocaleString()} hom-ref/no-call records skipped.`;
+  const filterLabel = stats.record_filter === "all_concrete"
+    ? "all concrete REF/ALT records"
+    : "called alternate variants only";
+  return `${Number(stats.raw_records || 0).toLocaleString()} raw records; ${Number(stats.keyed_records || 0).toLocaleString()} ${filterLabel}; ${Number(stats.matched_records || 0).toLocaleString()} curated matches; ${Number(stats.skipped_non_alt_gt || 0).toLocaleString()} hom-ref/no-call records skipped.`;
 }
 
 function renderTimings() {
@@ -1020,6 +1088,66 @@ function renderTimings() {
       </table>
     </div>
   </div>
+</div>`;
+}
+
+function selectOptions(values, selected, labels = {}) {
+  return values.map((value) => `
+<option value="${escapeHtml(value)}" ${String(value) === String(selected || "") ? "selected" : ""}>${escapeHtml(labels[value] || value || "any")}</option>`).join("");
+}
+
+function renderResultsTable(rows) {
+  if (!rows.length) {
+    return `<p class="text-muted mb-0">No rows match the current filters.</p>`;
+  }
+  const body = rows.map((row, idx) => `
+<tr>
+  <td>${riskBadge(row.risk_level)}<br><span class="text-muted small">${escapeHtml(row.category)}</span></td>
+  <td><strong>${escapeHtml(row.gene)}</strong><br><span class="text-muted small">${escapeHtml(row.source_id || row.annotation_id)}</span></td>
+  <td>${escapeHtml(row.name)}</td>
+  <td><code>${escapeHtml(row.input_genotype || row.genotype_norm)}</code><br><span class="text-muted small">norm ${escapeHtml(row.genotype_norm)}</span></td>
+  <td>${escapeHtml(row.significance?.replaceAll("_", " "))}<br><span class="text-muted small">priority score ${escapeHtml(row.score)}</span></td>
+  <td>
+    <button class="btn btn-sm btn-outline-dark" type="button" data-bs-toggle="collapse" data-bs-target="#detail-all-${idx}">Details</button>
+  </td>
+</tr>
+<tr class="collapse-row">
+  <td colspan="6" class="p-0 border-0">
+    <div class="collapse" id="detail-all-${idx}">
+      <div class="p-3 bg-light border-bottom">
+        <div class="row g-3">
+          <div class="col-lg-7">
+            <h6>Interpretation</h6>
+            <p>${escapeHtml(row.interpretation)}</p>
+            <h6>Description</h6>
+            <p class="mb-0">${escapeHtml(row.description)}</p>
+          </div>
+          <div class="col-lg-5 small">
+            <dl class="row mb-2">
+              <dt class="col-5">VariantKey</dt><dd class="col-7"><code>${escapeHtml(row.variant_key_hex)}</code></dd>
+              <dt class="col-5">Build</dt><dd class="col-7">${escapeHtml(row.build)}</dd>
+              <dt class="col-5">Input locus</dt><dd class="col-7">${escapeHtml(row.input_chrom)}:${escapeHtml(row.input_pos)}</dd>
+              <dt class="col-5">Alleles</dt><dd class="col-7">normal ${escapeHtml(row.normal_allele)} · risk/effect ${escapeHtml(row.risk_allele)}</dd>
+              <dt class="col-5">Source</dt><dd class="col-7">${escapeHtml(row.source)}</dd>
+              <dt class="col-5">PMIDs</dt><dd class="col-7">${escapeHtml(row.publications || "")}</dd>
+            </dl>
+            <div>${externalLinks(row)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </td>
+</tr>`).join("");
+  return `
+<div class="table-responsive results-scroll border">
+  <table class="table table-hover align-middle mb-0">
+    <thead>
+      <tr>
+        <th>Risk / category</th><th>Gene / source</th><th>Variant</th><th>Your genotype</th><th>Evidence</th><th></th>
+      </tr>
+    </thead>
+    <tbody>${body}</tbody>
+  </table>
 </div>`;
 }
 
@@ -1082,17 +1210,9 @@ function renderTable(rows, category) {
 
 function renderResults(summary, rows) {
   const total = Number(summary.total_variants_found || 0);
-  const categories = ["health_risk", "pharmacogenomics", "trait"];
-  const categoryTabs = categories.map((category, idx) => `
-<li class="nav-item" role="presentation">
-  <button class="nav-link ${idx === 0 ? "active" : ""}" id="${category}-tab" data-bs-toggle="tab" data-bs-target="#${category}-pane" type="button" role="tab">
-    ${categoryLabel(category)} <span class="badge text-bg-secondary ms-1">${Number(summary[`${category === "health_risk" ? "health_risk" : category}_count`] || 0)}</span>
-  </button>
-</li>`).join("");
-  const panes = categories.map((category, idx) => `
-<div class="tab-pane fade ${idx === 0 ? "show active" : ""}" id="${category}-pane" role="tabpanel" aria-labelledby="${category}-tab">
-  ${renderTable(rows, category)}
-</div>`).join("");
+  const filters = normalizeResultFilters(summary.filters || state.resultFilters);
+  const pageStart = total ? filters.offset + 1 : 0;
+  const pageEnd = Math.min(filters.offset + rows.length, total);
 
   nodes.results.innerHTML = `
 <section class="my-4">
@@ -1108,7 +1228,7 @@ function renderResults(summary, rows) {
   </div>
 
   <div class="row g-3 mb-4">
-    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Curated matches${summary.searchText ? " shown" : ""}</div><div class="display-6">${total.toLocaleString()}</div></div></div></div>
+    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Curated matches${summary.searchText ? " shown" : ""}</div><div class="display-6">${total.toLocaleString()}</div><div class="small text-muted">Rows ${pageStart.toLocaleString()}-${pageEnd.toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">High risk</div><div class="display-6 text-danger">${Number(summary.high_risk_count || 0).toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Health</div><div class="display-6">${Number(summary.health_risk_count || 0).toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Pharma + traits</div><div class="display-6">${(Number(summary.pharmacogenomics_count || 0) + Number(summary.trait_count || 0)).toLocaleString()}</div></div></div></div>
@@ -1117,31 +1237,64 @@ function renderResults(summary, rows) {
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
       <div class="row g-2 align-items-end">
-        <div class="col-lg-6">
-          <label class="form-label" for="result-search">Search results with DuckDB</label>
-          <input id="result-search" class="form-control" type="search" value="${escapeHtml(summary.searchText || "")}" placeholder="gene, rsID, ClinVar term, category, genotype..." />
+        <div class="col-lg-4">
+          <label class="form-label" for="result-search">Global search</label>
+          <input id="result-search" class="form-control" type="search" value="${escapeHtml(filters.search)}" placeholder="gene, rsID, ClinVar term, genotype..." />
         </div>
-        <div class="col-lg-3 d-flex gap-2">
-          <button id="result-search-button" type="button" class="btn btn-outline-primary">Search</button>
+        <div class="col-lg-2">
+          <label class="form-label" for="filter-gene">Gene</label>
+          <input id="filter-gene" class="form-control" value="${escapeHtml(filters.gene)}" placeholder="F5" />
+        </div>
+        <div class="col-lg-2">
+          <label class="form-label" for="filter-source">rsID / source</label>
+          <input id="filter-source" class="form-control" value="${escapeHtml(filters.source)}" placeholder="rs6025" />
+        </div>
+        <div class="col-lg-2">
+          <label class="form-label" for="filter-category">Category</label>
+          <select id="filter-category" class="form-select">
+            ${selectOptions(["", "health_risk", "pharmacogenomics", "trait"], filters.category, { "": "any" })}
+          </select>
+        </div>
+        <div class="col-lg-2">
+          <label class="form-label" for="filter-risk">Risk</label>
+          <select id="filter-risk" class="form-select">
+            ${selectOptions(["", "high_risk", "increased_risk", "drug_response", "annotation_match", "normal"], filters.risk, { "": "any" })}
+          </select>
+        </div>
+        <div class="col-lg-2">
+          <label class="form-label" for="filter-significance">Significance</label>
+          <select id="filter-significance" class="form-select">
+            ${selectOptions(["", "pathogenic", "likely_pathogenic", "drug_response", "risk_factor", "association"], filters.significance, { "": "any" })}
+          </select>
+        </div>
+        <div class="col-lg-2">
+          <label class="form-label" for="result-page-size">Rows/page</label>
+          <select id="result-page-size" class="form-select">
+            ${selectOptions([100, 250, 500, 1000], filters.limit)}
+          </select>
+        </div>
+        <div class="col-lg-4 d-flex flex-wrap gap-2">
+          <button id="result-search-button" type="button" class="btn btn-outline-primary">Apply filters</button>
           <button id="result-clear-search" type="button" class="btn btn-outline-secondary">Clear</button>
+          <button id="result-prev-page" type="button" class="btn btn-outline-secondary" ${filters.offset <= 0 ? "disabled" : ""}>Previous</button>
+          <button id="result-next-page" type="button" class="btn btn-outline-secondary" ${pageEnd >= total ? "disabled" : ""}>Next</button>
         </div>
-        <div class="col-lg-3 d-flex gap-2 justify-content-lg-end">
+        <div class="col-lg-4 d-flex gap-2 justify-content-lg-end">
           <select id="export-format" class="form-select w-auto" aria-label="Export format">
             <option value="tsv">TSV</option>
             <option value="csv">CSV for Excel</option>
             <option value="xlsx">Excel .xlsx</option>
             <option value="parquet">Parquet</option>
           </select>
-          <button id="download-button" type="button" class="btn btn-outline-success" ${total ? "" : "disabled"}>Export</button>
+          <button id="download-button" type="button" class="btn btn-outline-success" ${total ? "" : "disabled"}>Export filtered</button>
         </div>
       </div>
-      <div class="form-text mt-2">Search and export run against the browser DuckDB <code>analysis_matches</code> table. Exports include the current search filter.</div>
+      <div class="form-text mt-2">Filters, paging, and export query the browser DuckDB <code>analysis_matches</code> table. The table below shows only the current page, not the full match set.</div>
     </div>
   </div>
 
   ${renderTimings()}
-  <ul class="nav nav-tabs" role="tablist">${categoryTabs}</ul>
-  <div class="tab-content border border-top-0 p-3 bg-white">${panes}</div>
+  ${renderResultsTable(rows)}
 </section>`;
   bindResultControls();
 }
@@ -1181,7 +1334,13 @@ async function analyzeSelectedFile(file) {
 
     const context = inputKind === "23andme"
       ? await analyze23AndMe(file, analysisBuild)
-      : await analyzeVcfBcf(file, inputBuild, analysisBuild, nodes["liftover-mode"].value);
+      : await analyzeVcfBcf(
+        file,
+        inputBuild,
+        analysisBuild,
+        nodes["liftover-mode"].value,
+        nodes["vcf-record-filter"].value,
+      );
 
     const { summary, rows } = await runTimedStep({
       label: "Summarize results",
@@ -1204,6 +1363,211 @@ async function analyzeSelectedFile(file) {
   }
 }
 
+function stripMarkup(value) {
+  return String(value || "").replace(/<[^>]*>/g, "");
+}
+
+function litVar2ApiUrl(path) {
+  return `${LITVAR2_API_BASE}/${path}`;
+}
+
+function litVar2SiteSearchUrl(query) {
+  return `${LITVAR2_SITE_BASE}/?query=${encodeURIComponent(query)}`;
+}
+
+function litVar2DocsumUrl(variantId, query) {
+  return `${LITVAR2_SITE_BASE}/docsum?variant=${encodeURIComponent(variantId)}&query=${encodeURIComponent(query)}`;
+}
+
+function parseLitVar2Payload(text) {
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    const rows = [];
+    for (const line of text.split(/\r?\n/)) {
+      const id = line.match(/'_id': '([^']+)'/);
+      const rsid = line.match(/'rsid': '([^']+)'/);
+      const pmids = line.match(/'pmids_count': ([0-9]+)/);
+      if (id || rsid) {
+        rows.push({
+          _id: id?.[1] || null,
+          rsid: rsid?.[1] || null,
+          pmids_count: pmids ? Number(pmids[1]) : null,
+        });
+      }
+    }
+    if (rows.length) return rows;
+    throw new Error("LitVar2 returned a response this browser could not parse.");
+  }
+}
+
+async function fetchLitVar2(path) {
+  const response = await fetch(litVar2ApiUrl(path), {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`LitVar2 HTTP ${response.status}`);
+  }
+  return parseLitVar2Payload(await response.text());
+}
+
+function normalizeLitVar2Rows(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  return [value];
+}
+
+function litVar2Links(query, firstVariantId = null) {
+  const encoded = encodeURIComponent(query);
+  const links = [
+    `<a href="${escapeHtml(litVar2SiteSearchUrl(query))}" target="_blank" rel="noopener">LitVar2 site search</a>`,
+    `<a href="${escapeHtml(litVar2ApiUrl(`variant/autocomplete/?query=${encoded}&limit=10`))}" target="_blank" rel="noopener">autocomplete API</a>`,
+  ];
+  if (/^rs\d+$/i.test(query)) {
+    links.push(`<a href="${escapeHtml(litVar2ApiUrl(`sensor/${encoded}`))}" target="_blank" rel="noopener">sensor API</a>`);
+  }
+  if (/^[A-Za-z][A-Za-z0-9.-]{1,19}$/.test(query) && !/^rs\d+$/i.test(query)) {
+    links.push(`<a href="${escapeHtml(litVar2ApiUrl(`variant/search/gene/${encoded}`))}" target="_blank" rel="noopener">gene API</a>`);
+  }
+  if (firstVariantId) {
+    links.push(`<a href="${escapeHtml(litVar2DocsumUrl(firstVariantId, query))}" target="_blank" rel="noopener">variant page</a>`);
+    links.push(`<a href="${escapeHtml(litVar2ApiUrl(`variant/get/${encodeURIComponent(firstVariantId)}/publications`))}" target="_blank" rel="noopener">publications API</a>`);
+  }
+  return links.join(" · ");
+}
+
+function renderLitVar2Hits(rows, query) {
+  const hits = normalizeLitVar2Rows(rows).slice(0, 10);
+  if (!hits.length) return `<p class="text-muted small mb-0">No variant hits returned.</p>`;
+  return `
+<div class="table-responsive">
+  <table class="table table-sm align-middle mb-0">
+    <thead><tr><th>Variant</th><th>Gene</th><th>PMIDs</th><th>Clinical tags</th><th></th></tr></thead>
+    <tbody>${hits.map((hit) => {
+      const id = hit._id || "";
+      const rsid = hit.rsid || hit.name || id;
+      const genes = Array.isArray(hit.gene) ? hit.gene.join(", ") : (hit.gene || "");
+      const tags = Array.isArray(hit.data_clinical_significance)
+        ? hit.data_clinical_significance.join(", ")
+        : "";
+      return `
+<tr>
+  <td><strong>${escapeHtml(rsid)}</strong><br><span class="text-muted small">${escapeHtml(stripMarkup(hit.match || hit.hgvs || hit.name || ""))}</span></td>
+  <td>${escapeHtml(genes)}</td>
+  <td>${escapeHtml(hit.pmids_count ?? "")}</td>
+  <td>${escapeHtml(tags)}</td>
+  <td>${id ? `<a href="${escapeHtml(litVar2DocsumUrl(id, query))}" target="_blank" rel="noopener">Open</a>` : ""}</td>
+</tr>`;
+    }).join("")}</tbody>
+  </table>
+</div>`;
+}
+
+function renderLitVar2Publications(publications) {
+  const pmids = normalizeLitVar2Rows(publications?.pmids).slice(0, 12);
+  if (!pmids.length) return "";
+  return `<p class="small mb-0"><strong>Top PMID links:</strong> ${pmids.map((pmid) => `<a href="https://pubmed.ncbi.nlm.nih.gov/${escapeHtml(pmid)}/" target="_blank" rel="noopener">${escapeHtml(pmid)}</a>`).join(" · ")}</p>`;
+}
+
+function renderLitVar2Summary(summary) {
+  if (!summary || !summary._id) return "";
+  const tags = Array.isArray(summary.data_clinical_significance)
+    ? summary.data_clinical_significance.join(", ")
+    : "";
+  const positions = Array.isArray(summary.data_chromosome_base_position)
+    ? summary.data_chromosome_base_position.join(", ")
+    : "";
+  return `
+<div class="alert alert-light border small mb-3">
+  <div><strong>${escapeHtml(summary.rsid || summary.name || summary._id)}</strong> ${escapeHtml(summary.hgvs || "")}</div>
+  <div>Gene: ${escapeHtml(Array.isArray(summary.gene) ? summary.gene.join(", ") : summary.gene || "")}</div>
+  <div>Position(s): ${escapeHtml(positions)}</div>
+  <div>Clinical tags: ${escapeHtml(tags)}</div>
+</div>`;
+}
+
+function renderLitVar2Results({ query, autocomplete, sensor, geneRows, summary, publications, errors }) {
+  const firstId = normalizeLitVar2Rows(autocomplete)[0]?._id || normalizeLitVar2Rows(geneRows)[0]?._id || summary?._id;
+  const errorText = errors.length
+    ? `<div class="alert alert-warning small">Some LitVar2 calls failed, often because browser CORS is not enabled for this origin: ${escapeHtml(errors.map((error) => error.message || String(error)).join("; "))}</div>`
+    : "";
+  const sensorHtml = sensor?.link
+    ? `<p class="small"><strong>Sensor:</strong> ${escapeHtml(sensor.pmids_count)} publications · <a href="${escapeHtml(sensor.link)}" target="_blank" rel="noopener">Open LitVar2 docsum</a></p>`
+    : "";
+  const geneHtml = normalizeLitVar2Rows(geneRows).length
+    ? `<details class="small mt-3"><summary>Gene API returned ${normalizeLitVar2Rows(geneRows).length.toLocaleString()} variants; first 10 shown in direct API output.</summary>${renderLitVar2Hits(geneRows, query)}</details>`
+    : "";
+  return `
+${errorText}
+${renderLitVar2Summary(summary)}
+${sensorHtml}
+<h4 class="h6">Variant search hits</h4>
+${renderLitVar2Hits(autocomplete, query)}
+${renderLitVar2Publications(publications)}
+${geneHtml}
+<p class="small text-muted mt-3 mb-0">${litVar2Links(query, firstId)}</p>`;
+}
+
+async function runLitVar2Search() {
+  const input = byId("litvar2-query");
+  const output = byId("litvar2-results");
+  const openLink = byId("litvar2-open-link");
+  const query = input?.value?.trim() || "";
+  if (!output) return;
+  if (!query) {
+    output.innerHTML = `<div class="alert alert-warning small mb-0">Enter an rsID, variant name, or gene.</div>`;
+    return;
+  }
+  if (openLink) openLink.href = litVar2SiteSearchUrl(query);
+  output.innerHTML = `<div class="text-muted small"><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Searching LitVar2...</div>`;
+
+  const encoded = encodeURIComponent(query);
+  const jobs = [
+    ["autocomplete", `variant/autocomplete/?query=${encoded}&limit=10`],
+  ];
+  if (/^rs\d+$/i.test(query)) jobs.push(["sensor", `sensor/${encoded}`]);
+  if (/^[A-Za-z][A-Za-z0-9.-]{1,19}$/.test(query) && !/^rs\d+$/i.test(query)) {
+    jobs.push(["geneRows", `variant/search/gene/${encoded}`]);
+  }
+
+  const results = {};
+  const errors = [];
+  await Promise.all(jobs.map(async ([name, path]) => {
+    try {
+      results[name] = await fetchLitVar2(path);
+    } catch (error) {
+      errors.push(error);
+    }
+  }));
+
+  const firstId = normalizeLitVar2Rows(results.autocomplete)[0]?._id || normalizeLitVar2Rows(results.geneRows)[0]?._id;
+  if (firstId) {
+    try {
+      results.summary = await fetchLitVar2(`variant/get/${encodeURIComponent(firstId)}`);
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      results.publications = await fetchLitVar2(`variant/get/${encodeURIComponent(firstId)}/publications`);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
+  if (!results.autocomplete && !results.geneRows && !results.sensor && errors.length) {
+    output.innerHTML = `
+<div class="alert alert-warning small">
+  Browser calls to the LitVar2 API failed. This is commonly a CORS restriction from NCBI for the current site origin.
+  Use the direct links below.
+</div>
+<p class="small mb-0">${litVar2Links(query)}</p>`;
+    return;
+  }
+
+  output.innerHTML = renderLitVar2Results({ query, errors, ...results });
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1215,26 +1579,41 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function applyResultSearch(searchText) {
+function readResultFilters(offsetOverride = null) {
+  const current = normalizeResultFilters(state.resultFilters);
+  return normalizeResultFilters({
+    search: byId("result-search")?.value || "",
+    gene: byId("filter-gene")?.value || "",
+    source: byId("filter-source")?.value || "",
+    category: byId("filter-category")?.value || "",
+    significance: byId("filter-significance")?.value || "",
+    risk: byId("filter-risk")?.value || "",
+    limit: byId("result-page-size")?.value || current.limit,
+    offset: offsetOverride ?? 0,
+  });
+}
+
+async function applyResultFilters(filters = null) {
   if (!state.lastSummary) return;
   const context = {
     inputKind: state.lastSummary.inputKind,
     analysisBuild: state.lastSummary.analysisBuild,
     stats: state.lastSummary.stats,
   };
+  const nextFilters = normalizeResultFilters(filters || readResultFilters());
   const { summary, rows } = await runTimedStep({
-    label: "Search results",
-    detail: "Filtering the browser DuckDB analysis_matches table.",
-    successSummary: "Search results are ready",
-    failureSummary: "Could not search results",
-  }, () => collectResults(context, searchText));
+    label: "Filter results",
+    detail: "Filtering and paging the browser DuckDB analysis_matches table.",
+    successSummary: "Filtered result page is ready",
+    failureSummary: "Could not filter results",
+  }, () => collectResults(context, nextFilters));
   renderResults(summary, rows);
 }
 
 async function exportResults() {
   if (!state.lastSummary) return;
   const format = byId("export-format")?.value || "tsv";
-  const whereSql = resultSearchWhere(state.currentSearch);
+  const whereSql = resultFiltersWhere(state.resultFilters);
   const ext = format === "parquet" ? "parquet" : format === "xlsx" ? "xlsx" : format === "csv" ? "csv" : "tsv";
   const outputPath = `${VFS_ROOT}/duckgenesnap_results_${Date.now()}.${ext}`;
   const selectSql = `SELECT * FROM analysis_matches ${whereSql} ORDER BY ${resultOrderSql()}`;
@@ -1280,18 +1659,45 @@ async function exportResults() {
 function bindResultControls() {
   const searchInput = byId("result-search");
   byId("result-search-button")?.addEventListener("click", () => {
-    applyResultSearch(searchInput?.value || "");
+    applyResultFilters(readResultFilters(0));
   });
   byId("result-clear-search")?.addEventListener("click", () => {
-    if (searchInput) searchInput.value = "";
-    applyResultSearch("");
+    ["result-search", "filter-gene", "filter-source"].forEach((id) => {
+      const node = byId(id);
+      if (node) node.value = "";
+    });
+    ["filter-category", "filter-risk", "filter-significance"].forEach((id) => {
+      const node = byId(id);
+      if (node) node.value = "";
+    });
+    applyResultFilters({ limit: byId("result-page-size")?.value || 250, offset: 0 });
   });
-  searchInput?.addEventListener("keydown", (event) => {
+  byId("result-prev-page")?.addEventListener("click", () => {
+    const f = normalizeResultFilters(state.resultFilters);
+    applyResultFilters({ ...f, offset: Math.max(f.offset - f.limit, 0) });
+  });
+  byId("result-next-page")?.addEventListener("click", () => {
+    const f = normalizeResultFilters(state.resultFilters);
+    applyResultFilters({ ...f, offset: f.offset + f.limit });
+  });
+  [
+    searchInput,
+    byId("filter-gene"),
+    byId("filter-source"),
+  ].forEach((node) => node?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      applyResultSearch(searchInput.value || "");
+      applyResultFilters(readResultFilters(0));
     }
-  });
+  }));
+  [
+    byId("filter-category"),
+    byId("filter-risk"),
+    byId("filter-significance"),
+    byId("result-page-size"),
+  ].forEach((node) => node?.addEventListener("change", () => {
+    applyResultFilters(readResultFilters(0));
+  }));
   byId("download-button")?.addEventListener("click", exportResults);
 }
 
@@ -1302,6 +1708,7 @@ function resetUi() {
   state.lastRows = [];
   state.lastSummary = null;
   state.currentSearch = "";
+  state.resultFilters = {};
   state.timings = [];
   if (nodes["timing-card"]) nodes["timing-card"].hidden = true;
   renderTimingList();
@@ -1327,6 +1734,24 @@ function updateLiftoverVisibility() {
   }
 }
 
+function bindAdvancedTools() {
+  const button = byId("litvar2-search-button");
+  const input = byId("litvar2-query");
+  if (button && !button.dataset.bound) {
+    button.dataset.bound = "true";
+    button.addEventListener("click", runLitVar2Search);
+  }
+  if (input && !input.dataset.bound) {
+    input.dataset.bound = "true";
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        runLitVar2Search();
+      }
+    });
+  }
+}
+
 function bindEvents() {
   nodes["analyze-button"].addEventListener("click", async () => {
     const file = nodes["file-input"].files?.[0];
@@ -1349,6 +1774,8 @@ function bindEvents() {
   });
   nodes["reset-button"].addEventListener("click", resetUi);
   nodes["liftover-mode"].addEventListener("change", updateLiftoverVisibility);
+  document.body.addEventListener("htmx:afterSwap", bindAdvancedTools);
+  document.body.addEventListener("shown.bs.collapse", bindAdvancedTools);
 }
 
 async function main() {
