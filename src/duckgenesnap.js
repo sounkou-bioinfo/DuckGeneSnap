@@ -901,13 +901,21 @@ JOIN variant_annotations a
   ON a.build = ${sqlString(analysisBuild)}
  AND a.chrom_norm = k.chrom_norm
  AND a.pos = k.pos
-JOIN variant_keys vk_exact
+LEFT JOIN variant_keys vk_exact
   ON vk_exact.annotation_id = a.annotation_id
  AND vk_exact.build = a.build
  AND vk_exact.variant_key = k.variant_key
+LEFT JOIN (
+  SELECT DISTINCT annotation_id, build
+  FROM variant_keys
+) vk_any
+  ON vk_any.annotation_id = a.annotation_id
+ AND vk_any.build = a.build
 LEFT JOIN genotype_interpretations gi
   ON gi.annotation_id = a.annotation_id
  AND gi.genotype_norm = k.genotype_norm
+WHERE vk_any.annotation_id IS NULL
+   OR vk_exact.annotation_id IS NOT NULL
 ORDER BY ${buildRiskOrderSql(annotationRiskSql())}, a.score DESC, a.gene, a.annotation_id
 `);
   });
