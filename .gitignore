@@ -11,9 +11,10 @@ tmp/
 .Ruserdata
 *.Rproj
 
-# DuckDB transient files
+# DuckDB transient/intermediate files
 *.duckdb.wal
 *.duckdb.tmp
+public/data/*.duckdb
 
 # Local servers/logs
 *.log

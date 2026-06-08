@@ -1,7 +1,6 @@
 # Static Asset Schema
 
-DuckGeneSnap ships a DuckDB annotation database plus browser-readable Parquet
-sidecars in `public/data/`.
+DuckGeneSnap ships browser-readable Parquet sidecars in `public/data/`.
 
 ## `variant_annotations`
 

@@ -1,13 +1,13 @@
 {
   "name": "DuckGeneSnap locus annotation bundle",
-  "generated_at": "2026-06-08T11:56:20Z",
+  "generated_at": "2026-06-08T12:25:53Z",
   "schema_version": 3,
   "matching_policy": "locus_first_build_chrom_pos",
   "supported_builds": [
-    "GRCh37"
+    "GRCh37",
+    "GRCh38"
   ],
   "assets": {
-    "duckdb_database": "public/data/duckgenesnap.duckdb",
     "variant_annotations": "public/data/variant_annotations.parquet",
     "genotype_interpretations": "public/data/genotype_interpretations.parquet",
     "variant_keys": "public/data/variant_keys.parquet",
@@ -19,10 +19,25 @@
   "counts": {
     "genotype_interpretations": 51,
     "index_summary": 4,
-    "variant_annotations": 16,
-    "variant_keys": 32
+    "variant_annotations": 1599759,
+    "variant_keys": 881438
   },
   "sources": [
+    {
+      "source": "clinvar",
+      "build": "GRCh37",
+      "row_count": 408502
+    },
+    {
+      "source": "clinvar",
+      "build": "GRCh38",
+      "row_count": 386647
+    },
+    {
+      "source": "gwas_catalog",
+      "build": "GRCh38",
+      "row_count": 804594
+    },
     {
       "source": "seed",
       "build": "GRCh37",
@@ -62,14 +77,9 @@
   },
   "sizes": [
     {
-      "file": "duckgenesnap.duckdb",
-      "bytes": 3682304,
-      "mib": 3.512
-    },
-    {
       "file": "variant_annotations.parquet",
-      "bytes": 6742,
-      "mib": 0.006
+      "bytes": 57275402,
+      "mib": 54.622
     },
     {
       "file": "genotype_interpretations.parquet",
@@ -78,18 +88,18 @@
     },
     {
       "file": "variant_keys.parquet",
-      "bytes": 3199,
-      "mib": 0.003
+      "bytes": 9431974,
+      "mib": 8.995
     },
     {
       "file": "asset_summary.parquet",
-      "bytes": 477,
+      "bytes": 484,
       "mib": 0
     },
     {
       "file": "source_summary.parquet",
-      "bytes": 481,
-      "mib": 0
+      "bytes": 554,
+      "mib": 0.001
     },
     {
       "file": "index_summary.parquet",
@@ -97,5 +107,5 @@
       "mib": 0.001
     }
   ],
-  "notes": ["Core ingestion matches on genome build, normalized chromosome, and 1-based position.", "source_id is metadata only and is not part of the ingestion join.", "variant_keys is an auxiliary allele-specific table for injection/display/future refinement.", "The browser stages the DuckDB file into the webR filesystem by default; remote ATTACH over HTTPS can be tested separately for larger deployments."]
+  "notes": ["Core ingestion matches on genome build, normalized chromosome, and 1-based position.", "source_id is metadata only and is not part of the ingestion join.", "variant_keys is an auxiliary allele-specific table for injection/display/future refinement.", "The browser reads sorted Parquet sidecars through DuckDB; use a range-capable static server for local testing with larger assets."]
 }

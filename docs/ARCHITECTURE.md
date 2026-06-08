@@ -1,13 +1,13 @@
 # DuckGeneSnap Architecture
 
-DuckGeneSnap is a static-site genomics analysis app. The runtime has no
-application server and no persistent database service.
+DuckGeneSnap is a static-site genomics analysis app. The runtime has no upload
+endpoint and no persistent application service.
 
 ```text
 build time
   ClinVar/GWAS/PharmGKB/seed sources
     -> DuckDB + Rduckhts injection
-    -> duckgenesnap.duckdb + sorted Parquet sidecars + manifest
+    -> sorted Parquet sidecars + manifest
 
 browser runtime
   index.html + duckgenesnap.js
@@ -15,7 +15,7 @@ browser runtime
     -> R packages: DBI, duckdb, Rduckhts, jsonlite
     -> local DuckDB connection
     -> uploaded 23andMe/VCF/BCF staged in webR FS
-    -> locus joins against attached DuckDB or Parquet fallback
+    -> locus joins against sorted Parquet assets
 ```
 
 ## Runtime layers
@@ -23,9 +23,9 @@ browser runtime
 1. **UI layer**: Bootstrap + small HTMX usage for static fragments.
 2. **Browser filesystem layer**: uploads are written into webR's in-memory
    filesystem under `/duckgenesnap/upload`.
-3. **DuckDB layer**: `duckgenesnap.duckdb` is staged and attached read-only.
-   Sorted Parquet sidecars are a fallback and may be preferable for large HTTP
-   deployments if attached DuckDB range reads are not efficient.
+3. **DuckDB layer**: sorted Parquet sidecars are staged into webR and exposed as
+   DuckDB views. For local testing, use a range-capable static server such as
+   <https://github.com/sounkou-bioinfo/goServeR>.
 4. **Rduckhts layer**: VCF/BCF parsing, VariantKey functions, and optional
    liftover are loaded through `Rduckhts::rduckhts_load(con)`.
 5. **Rendering layer**: query results are returned as JSON and rendered locally.
@@ -63,12 +63,11 @@ user-supplied chain/source/destination reference assets. The lifted destination
 locus is then used for matching. If allele-aware refinement is needed, the
 VariantKey is recomputed after liftover.
 
-## Indexes and Parquet statistics
+## Parquet statistics
 
-The DuckDB file may include persistent indexes for exact point workloads. The
-current defaults are documented in `index_summary` and `docs/SIZE_TESTS.md`.
-For Parquet, sidecars are sorted by locus and written with configurable row group
-size so row-group min/max statistics can prune genomic ranges.
+Sidecars are sorted by locus and written with configurable row group size so
+row-group min/max statistics can prune genomic ranges. Static production bundles
+use high ZSTD compression because write time is paid once at build time.
 
 ## Privacy model
 

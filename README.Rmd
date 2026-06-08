@@ -27,13 +27,12 @@ queried locally. No genotype data is uploaded to a server.
 
 ## What works now
 
-- Static `index.html`; no FastAPI/SQLite service.
+- Static `index.html` with local browser-side analysis.
 - 23andMe-style raw text upload.
 - VCF/BCF upload through `Rduckhts::rduckhts_bcf(..., tidy_format = TRUE)`.
 - Locus-first matching: `build + normalized chromosome + 1-based position`.
-- Static DuckDB annotation file staged into webR and attached read-only.
-- Sorted ZSTD Parquet sidecars with configurable row group size and compression
-  level.
+- Sorted ZSTD Parquet annotation assets staged into webR and queried with DuckDB.
+- Configurable Parquet row group size and compression level.
 - Auxiliary `variant_keys` table for allele-aware display, QA, and future
   exact-key refinement.
 - Optional VCF/BCF liftover hook using `bcftools_liftover()` when chain and
@@ -42,8 +41,10 @@ queried locally. No genotype data is uploaded to a server.
   DuckDB/webR layer.
 - Demo 23andMe-style file at `public/demo/example_23andme.txt`.
 
-The committed asset bundle is intentionally small: 16 demo curated loci and 32
-auxiliary VariantKey rows. Treat it as a scaffold for production asset builds.
+The committed annotation assets include ClinVar variant-summary rows for GRCh37
+and GRCh38 (pathogenic/likely pathogenic, drug response, risk factor, and
+association records), GWAS Catalog associations filtered at genome-wide
+significance, and a small GRCh37 seed set used by the local demo files.
 
 ## Hosted site
 
@@ -54,12 +55,16 @@ GitHub Pages is configured for the repository root:
 ## Run locally
 
 Serve the repository over HTTP; do not open `index.html` with `file://`.
+For local testing, prefer goServeR because it supports range requests out of the
+box:
 
 ```bash
 cd DuckGeneSnap
-python3 -m http.server 8000
-# open http://localhost:8000/
+Rscript -e "goserveR::runServer(dir='.', prefix='/', addr='127.0.0.1:8000')"
+# open http://127.0.0.1:8000/
 ```
+
+If needed, install goServeR from <https://github.com/sounkou-bioinfo/goServeR>.
 
 First browser use can take a while because webR installs `DBI`, `duckdb`,
 `jsonlite`, and `Rduckhts` into the browser runtime.
@@ -77,8 +82,8 @@ Useful size-test examples:
 
 ```bash
 Rscript scripts/build_assets.R \
-  --out-dir .size_tests/clinvar_hg38_noidx \
-  --clinvar-grch38-bcf path/to/clinvar_hg38_p_lp.bcf \
+  --out-dir .size_tests/clinvar_tsv_noidx \
+  --clinvar-tsv path/to/variant_summary.txt.gz \
   --skip-seed \
   --skip-indexes
 
@@ -91,7 +96,6 @@ Rscript scripts/build_assets.R \
 
 Outputs:
 
-- `public/data/duckgenesnap.duckdb`
 - `public/data/variant_annotations.parquet`
 - `public/data/genotype_interpretations.parquet`
 - `public/data/variant_keys.parquet`
@@ -104,7 +108,7 @@ See `docs/SIZE_TESTS.md` for measured ClinVar/GWAS bundle sizes, index overhead,
 ZSTD compression-level tests, `parquet-linter` output, and Parquet row group
 trade-offs.
 
-## Committed demo asset sizes
+## Committed annotation asset sizes
 
 ```{r asset-sizes, echo=FALSE, results='asis'}
 size_path <- file.path("public", "data", "size_report.tsv")
@@ -116,15 +120,27 @@ if (file.exists(size_path)) {
 }
 ```
 
+## Demo and test inputs
+
+The repository includes small synthetic input files for testing both supported
+input paths and both builds represented in the committed assets:
+
+- `public/demo/example_23andme.txt`
+- `public/demo/example_23andme_grch37.txt`
+- `public/demo/example_23andme_grch38.txt`
+- `public/demo/example_grch37.vcf`
+- `public/demo/example_grch37.bcf`
+- `public/demo/example_grch38.vcf`
+- `public/demo/example_grch38.bcf`
+
 ## Repository layout
 
 ```text
 index.html                         static app shell
 src/duckgenesnap.js                browser webR/DuckDB/Rduckhts runtime
-public/data/duckgenesnap.duckdb    attachable annotation database
-public/data/*.parquet              sorted sidecars/fallback assets
-public/demo/example_23andme.txt    synthetic demo input
-data/seed/*.tsv                    small demo curation source
+public/data/*.parquet              sorted annotation and metadata assets
+public/demo/*                      synthetic chip/VCF/BCF test inputs
+data/seed/*.tsv                    GRCh37 seed curation source
 scripts/build_assets.R             optparse asset builder/injector
 docs/                              design, schema, size notes
 ```
@@ -154,9 +170,8 @@ source chrom/pos/ref/alt
 
 DuckGeneSnap is an independent static-site/DuckDB/Rduckhts implementation
 inspired by the upstream GeneSnap project by syao13:
-<https://github.com/syao13/GeneSnap>. The upstream GeneSnap README describes a
-FastAPI + SQLite + React application for parsing raw 23andMe data and annotating
-clinically significant variants. DuckGeneSnap keeps the user-facing idea but
+<https://github.com/syao13/GeneSnap>. DuckGeneSnap keeps the user-facing idea
+of parsing raw genetic data and annotating clinically significant variants, but
 moves the analysis into a backend-free browser runtime.
 
 The planned variant detail panels also take inspiration from the lightweight

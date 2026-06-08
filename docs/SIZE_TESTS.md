@@ -4,7 +4,9 @@ Generated with `scripts/build_assets.R` on 2026-06-08.
 
 ## Inputs tested
 
-- ClinVar P/LP GRCh38 BCF from DuckBedQC:
+- ClinVar tab-delimited variant summary:
+  `variant_summary.txt.gz`
+- Earlier comparison runs also used ClinVar P/LP GRCh38 BCF from DuckBedQC:
   `clinvar_hg38_pathogenic_likelypathogenic.bcf`
 - GWAS Catalog full associations ZIP, filtered at `p <= 5e-8`
 
@@ -14,16 +16,16 @@ Initial runs used DuckDB Parquet ZSTD level 1 unless otherwise noted.
 
 | Bundle | Rows | Indexes | DuckDB | annotation Parquet | key Parquet |
 |---|---:|---|---:|---:|---:|
-| seed demo | 16 | yes | 3.51 MiB | 0.006 MiB | 0.003 MiB |
+| seed-only scaffold | 16 | yes | 3.51 MiB | 0.006 MiB | 0.003 MiB |
 | ClinVar GRCh38 P/LP | 337,482 | yes | 123.51 MiB | 14.26 MiB | 5.28 MiB |
 | ClinVar GRCh38 P/LP | 337,482 | no | 65.51 MiB | 14.26 MiB | 5.28 MiB |
 | GWAS Catalog p<=5e-8 | 804,594 | no | 124.01 MiB | 37.13 MiB | 0 MiB |
-| ClinVar + GWAS | 1,142,076 | no | 190.01 MiB | 55.17 MiB | 5.28 MiB |
+| ClinVar BCF + GWAS | 1,142,076 | no | 190.01 MiB | 55.17 MiB | 5.28 MiB |
+| ClinVar TSV + GWAS + seed | 1,599,759 | no | not kept | 54.62 MiB | 9.00 MiB |
 
-Takeaway: the DuckDB database is convenient for `ATTACH`, but persistent indexes
-roughly doubled the ClinVar test DB. Sorted Parquet sidecars are much smaller and
-are likely the better browser default if HTTP range behavior for attached DuckDB
-files is not good enough.
+Takeaway: the DuckDB database is useful as a build intermediate, but persistent
+indexes roughly doubled the ClinVar test DB. Sorted Parquet sidecars are much
+smaller and are the browser default.
 
 ## ZSTD compression level test
 
@@ -61,8 +63,8 @@ scans, 250k is smaller.
 
 ## parquet-linter run
 
-`parquet-linter` was run on the current tiny public Parquet files and on the
-large combined ClinVar + GWAS annotation sidecar.
+`parquet-linter` was run on the current public Parquet files and on the earlier
+combined ClinVar BCF + GWAS annotation sidecar.
 
 Useful findings:
 
@@ -93,5 +95,4 @@ rather than applying the rewrite automatically.
 | `idx_vk_annotation` | `variant_keys` | `annotation_id` | Detail-panel lookup of auxiliary key rows. |
 
 Use `--skip-indexes` for compressed static bundles where Parquet row-group stats
-are the main pruning mechanism or where DuckDB HTTP attach range behavior is not
-confirmed.
+are the main pruning mechanism.

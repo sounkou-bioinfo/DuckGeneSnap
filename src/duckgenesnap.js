@@ -224,38 +224,26 @@ async function stageAssets() {
   if (state.backend.assetsReady) return;
   await warmBackend();
   const manifest = await fetchManifest();
-  const dbFilename = "duckgenesnap.duckdb";
-  const dbUrl = `${DATA_BASE}/${dbFilename}`;
-  const dbPath = `${VFS_DATA}/${dbFilename}`;
+  const assetEntries = [
+    "variant_annotations.parquet",
+    "genotype_interpretations.parquet",
+    "variant_keys.parquet",
+  ];
 
-  try {
-    const response = await fetch(dbUrl, { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    await state.backend.webR.FS.writeFile(dbPath, new Uint8Array(await response.arrayBuffer()));
-    await executeSql("DETACH ann").catch(() => {});
-    await executeSql(`ATTACH '${dbPath}' AS ann (READ_ONLY)`);
-    await executeSql("CREATE OR REPLACE VIEW variant_annotations AS SELECT * FROM ann.variant_annotations");
-    await executeSql("CREATE OR REPLACE VIEW genotype_interpretations AS SELECT * FROM ann.genotype_interpretations");
-    await executeSql("CREATE OR REPLACE VIEW variant_keys AS SELECT * FROM ann.variant_keys");
-    setAssetStatus(`Attached local DuckDB annotation file: ${manifest.counts?.variant_annotations ?? "?"} locus annotations.`, "success");
-  } catch (error) {
-    console.warn("DuckDB file attach failed; falling back to Parquet assets", error);
-    const assetEntries = [
-      "variant_annotations.parquet",
-      "genotype_interpretations.parquet",
-      "variant_keys.parquet",
-    ];
-    for (const filename of assetEntries) {
-      const url = `${DATA_BASE}/${filename}`;
-      const response = await fetch(url, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Failed to fetch asset ${url}`);
-      await state.backend.webR.FS.writeFile(`${VFS_DATA}/${filename}`, new Uint8Array(await response.arrayBuffer()));
-    }
-    await executeSql(`CREATE OR REPLACE VIEW variant_annotations AS SELECT * FROM read_parquet('${VFS_DATA}/variant_annotations.parquet')`);
-    await executeSql(`CREATE OR REPLACE VIEW genotype_interpretations AS SELECT * FROM read_parquet('${VFS_DATA}/genotype_interpretations.parquet')`);
-    await executeSql(`CREATE OR REPLACE VIEW variant_keys AS SELECT * FROM read_parquet('${VFS_DATA}/variant_keys.parquet')`);
-    setAssetStatus(`Loaded fallback Parquet assets: ${manifest.counts?.variant_annotations ?? "?"} locus annotations.`, "success");
+  for (const filename of assetEntries) {
+    const url = `${DATA_BASE}/${filename}`;
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Failed to fetch asset ${url}`);
+    await state.backend.webR.FS.writeFile(
+      `${VFS_DATA}/${filename}`,
+      new Uint8Array(await response.arrayBuffer()),
+    );
   }
+
+  await executeSql(`CREATE OR REPLACE VIEW variant_annotations AS SELECT * FROM read_parquet('${VFS_DATA}/variant_annotations.parquet')`);
+  await executeSql(`CREATE OR REPLACE VIEW genotype_interpretations AS SELECT * FROM read_parquet('${VFS_DATA}/genotype_interpretations.parquet')`);
+  await executeSql(`CREATE OR REPLACE VIEW variant_keys AS SELECT * FROM read_parquet('${VFS_DATA}/variant_keys.parquet')`);
+  setAssetStatus(`Loaded Parquet annotations: ${manifest.counts?.variant_annotations ?? "?"} locus rows.`, "success");
 
   state.backend.assetsReady = true;
 }
@@ -330,8 +318,8 @@ SELECT
   marker_id::VARCHAR AS marker_id,
   chrom::VARCHAR AS chrom,
   CASE
-    WHEN upper(CASE WHEN starts_with(lower(chrom), 'chr') THEN substr(chrom, 4) ELSE chrom END) IN ('M', 'MT') THEN 'MT'
-    ELSE upper(CASE WHEN starts_with(lower(chrom), 'chr') THEN substr(chrom, 4) ELSE chrom END)
+    WHEN upper(CASE WHEN starts_with(lower(chrom::VARCHAR), 'chr') THEN substr(chrom::VARCHAR, 4) ELSE chrom::VARCHAR END) IN ('M', 'MT') THEN 'MT'
+    ELSE upper(CASE WHEN starts_with(lower(chrom::VARCHAR), 'chr') THEN substr(chrom::VARCHAR, 4) ELSE chrom::VARCHAR END)
   END AS chrom_norm,
   pos::BIGINT AS pos,
   genotype::VARCHAR AS genotype,

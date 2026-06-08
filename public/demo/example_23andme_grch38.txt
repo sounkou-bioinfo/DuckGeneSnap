@@ -1,0 +1,6 @@
+# DuckGeneSnap synthetic GRCh38 chip-style test file
+# marker_id	chromosome	position	genotype
+clinvar_929884	1	943995	CT
+clinvar_904889	1	964512	AC
+clinvar_1015460	1	1013983	AG
+clinvar_181485	1	1014143	CT

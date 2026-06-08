@@ -45,15 +45,18 @@ option_list <- list(
   ),
   make_opt(
     c("--duckdb-file"),
-    default = "duckgenesnap.duckdb",
+    default = "annotation-build.duckdb",
     metavar = "NAME",
-    help = "Output DuckDB database filename [default: %default]."
+    help = paste(
+      "Intermediate DuckDB filename when --keep-duckdb is set",
+      "[default: %default]."
+    )
   ),
   make_opt(
     c("--skip-seed"),
     action = "store_true",
     default = FALSE,
-    help = "Do not load demo seed TSV annotations."
+    help = "Do not load bundled GRCh37 seed TSV annotations."
   ),
   make_opt(
     c("--clinvar-grch37-bcf"),
@@ -66,6 +69,15 @@ option_list <- list(
     default = NULL,
     metavar = "PATH",
     help = "Optional ClinVar GRCh38/hg38 VCF/BCF to inject."
+  ),
+  make_opt(
+    c("--clinvar-tsv"),
+    default = NULL,
+    metavar = "PATH",
+    help = paste(
+      "Optional ClinVar variant_summary.txt.gz TSV.",
+      "Preferred source because it carries GRCh37 and GRCh38 loci."
+    )
   ),
   make_opt(
     c("--clinvar-row-limit"),
@@ -141,6 +153,12 @@ option_list <- list(
     action = "store_true",
     default = FALSE,
     help = "Skip Parquet sidecar emission."
+  ),
+  make_opt(
+    c("--keep-duckdb"),
+    action = "store_true",
+    default = FALSE,
+    help = "Also keep the intermediate DuckDB build database."
   ),
   make_opt(
     c("--parquet-row-group-size"),
@@ -243,9 +261,16 @@ if (
   stop("--parquet-compression-level must be between 1 and 22", call. = FALSE)
 }
 
-db_path <- file.path(out_dir, opt("duckdb_file"))
+public_duckdb_path <- file.path(out_dir, opt("duckdb_file"))
+db_path <- if (opt("keep_duckdb")) {
+  public_duckdb_path
+} else {
+  tempfile("duckgenesnap-build-", fileext = ".duckdb")
+}
 unlink(
   c(
+    public_duckdb_path,
+    paste0(public_duckdb_path, ".wal"),
     db_path,
     paste0(db_path, ".wal"),
     file.path(out_dir, "variants.parquet")
@@ -627,6 +652,148 @@ load_clinvar <- function(path, build_label, row_limit = 0L) {
   count_annotations("clinvar", build_label)
 }
 
+load_clinvar_tsv <- function(path, row_limit = 0L) {
+  if (is.null(path)) {
+    return(0L)
+  }
+  path <- path_arg(path)
+  message("Injecting ClinVar variant summary from ", path)
+
+  exec(sql(
+    "CREATE OR REPLACE TEMP VIEW clinvar_tsv_raw AS",
+    sprintf(
+      "SELECT * FROM read_csv(%s, delim='\\t', header=true,",
+      sql_quote_string(path)
+    ),
+    "  all_varchar=true, ignore_errors=true)"
+  ))
+
+  limit_sql <- ""
+  if (!is.null(row_limit) && row_limit > 0) {
+    limit_sql <- sprintf("LIMIT %d", row_limit)
+  }
+  cn <- chrom_norm_expr('"Chromosome"')
+
+  clinvar_tsv_sql <- sql(
+    "INSERT INTO variant_annotations",
+    "WITH filtered AS (",
+    "  SELECT",
+    "    *,",
+    "    lower(coalesce(ClinicalSignificance, '')) AS clinsig_lc,",
+    "    (__CHROM_NORM__) AS chrom_norm_value,",
+    "    try_cast(PositionVCF AS BIGINT) AS pos_value",
+    "  FROM clinvar_tsv_raw",
+    "  WHERE Assembly IN ('GRCh37', 'GRCh38')",
+    "    AND try_cast(PositionVCF AS BIGINT) IS NOT NULL",
+    "    AND coalesce(Chromosome, '') NOT IN ('', 'na', '-')",
+    "    AND (",
+    "      ClinSigSimple = '1'",
+    "      OR lower(coalesce(ClinicalSignificance, '')) LIKE '%drug%'",
+    "      OR lower(coalesce(ClinicalSignificance, '')) LIKE '%risk factor%'",
+    "      OR lower(coalesce(ClinicalSignificance, '')) LIKE '%association%'",
+    "    )",
+    "),",
+    "chosen AS (",
+    "  SELECT *",
+    "  FROM filtered",
+    "  ORDER BY Assembly, chrom_norm_value, pos_value, \"#AlleleID\"",
+    "  __LIMIT_SQL__",
+    ")",
+    "SELECT",
+    "  (",
+    "    'clinvar:' || Assembly || ':' || chrom_norm_value || ':' ||",
+    "    pos_value::VARCHAR || ':' || \"#AlleleID\"",
+    "  )::VARCHAR AS annotation_id,",
+    "  'clinvar'::VARCHAR AS source,",
+    "  CASE",
+    "    WHEN coalesce(\"RS# (dbSNP)\", '') NOT IN ('', '-')",
+    "    THEN 'rs' || \"RS# (dbSNP)\"",
+    "    ELSE coalesce(NULLIF(VariationID, ''), \"#AlleleID\")",
+    "  END::VARCHAR AS source_id,",
+    "  Assembly::VARCHAR AS build,",
+    "  Chromosome::VARCHAR AS chrom,",
+    "  chrom_norm_value::VARCHAR AS chrom_norm,",
+    "  pos_value::BIGINT AS pos,",
+    "  NULLIF(GeneSymbol, '-')::VARCHAR AS gene,",
+    "  CASE",
+    "    WHEN clinsig_lc LIKE '%drug%' THEN 'pharmacogenomics'",
+    "    WHEN clinsig_lc LIKE '%risk factor%' THEN 'trait'",
+    "    WHEN clinsig_lc LIKE '%association%' THEN 'trait'",
+    "    ELSE 'health_risk'",
+    "  END::VARCHAR AS category,",
+    "  ('ClinVar ' || coalesce(ClinicalSignificance, '') ||",
+    "    coalesce(' - ' || NULLIF(GeneSymbol, '-'), ''))::VARCHAR AS name,",
+    "  CASE",
+    "    WHEN clinsig_lc LIKE '%drug%' THEN 'drug_response'",
+    "    WHEN clinsig_lc LIKE '%risk factor%' THEN 'risk_factor'",
+    "    WHEN clinsig_lc LIKE '%association%' THEN 'association'",
+    "    WHEN clinsig_lc LIKE '%likely%' THEN 'likely_pathogenic'",
+    "    ELSE 'pathogenic'",
+    "  END::VARCHAR AS significance,",
+    "  (",
+    "    'ClinVar ' || coalesce(ClinicalSignificance, '') || '; ' ||",
+    "    coalesce(PhenotypeList, '') || '; review=' ||",
+    "    coalesce(ReviewStatus, '')",
+    "  )::VARCHAR AS description,",
+    "  NULLIF(AlternateAlleleVCF, 'na')::VARCHAR AS risk_allele,",
+    "  NULLIF(ReferenceAlleleVCF, 'na')::VARCHAR AS normal_allele,",
+    "  (",
+    "    '{\"alleleid\":\"' || coalesce(\"#AlleleID\", '') ||",
+    "    '\",\"variationid\":\"' || coalesce(VariationID, '') ||",
+    "    '\",\"rcv\":\"' || coalesce(RCVaccession, '') || '\"}'",
+    "  )::VARCHAR AS external_ids,",
+    "  NULL::VARCHAR AS publications,",
+    "  CASE",
+    "    WHEN lower(coalesce(ReviewStatus, '')) LIKE '%practice_guideline%'",
+    "    THEN 4",
+    "    WHEN lower(coalesce(ReviewStatus, '')) LIKE '%expert_panel%'",
+    "    THEN 4",
+    "    WHEN lower(coalesce(ReviewStatus, '')) LIKE '%criteria provided%'",
+    "    THEN 1",
+    "    ELSE 0",
+    "  END::INTEGER AS clinvar_stars,",
+    "  NULL::DOUBLE AS odds_ratio,",
+    "  (",
+    "    CASE",
+    "      WHEN clinsig_lc LIKE '%drug%' THEN 4",
+    "      WHEN clinsig_lc LIKE '%risk factor%' THEN 5",
+    "      WHEN clinsig_lc LIKE '%association%' THEN 2",
+    "      WHEN clinsig_lc LIKE '%likely%' THEN 8",
+    "      ELSE 10",
+    "    END::DOUBLE *",
+    "    (1 + CASE",
+    "      WHEN lower(coalesce(ReviewStatus, '')) LIKE",
+    "        '%practice_guideline%' THEN 4",
+    "      WHEN lower(coalesce(ReviewStatus, '')) LIKE '%expert_panel%'",
+    "      THEN 4",
+    "      WHEN lower(coalesce(ReviewStatus, '')) LIKE '%criteria provided%'",
+    "      THEN 1",
+    "      ELSE 0",
+    "    END)::DOUBLE",
+    "  ) AS score,",
+    "  (",
+    "    'clinsig=' || coalesce(ClinicalSignificance, '') ||",
+    "    ';origin=' || coalesce(Origin, '') ||",
+    "    ';type=' || coalesce(Type, '')",
+    "  )::VARCHAR AS source_payload",
+    "FROM chosen"
+  )
+  clinvar_tsv_sql <- gsub(
+    "__CHROM_NORM__",
+    cn,
+    clinvar_tsv_sql,
+    fixed = TRUE
+  )
+  clinvar_tsv_sql <- gsub(
+    "__LIMIT_SQL__",
+    limit_sql,
+    clinvar_tsv_sql,
+    fixed = TRUE
+  )
+  exec(clinvar_tsv_sql)
+  count_annotations("clinvar")
+}
+
 resolve_gwas_tsv <- function() {
   if (!is.null(opt("gwas_tsv")) && nzchar(opt("gwas_tsv"))) {
     return(path_arg(opt("gwas_tsv")))
@@ -886,6 +1053,10 @@ load_pharmgkb <- function(path, build_label) {
 }
 
 seed_n <- if (opt("skip_seed")) 0L else load_seed_annotations()
+clinvar_tsv_n <- load_clinvar_tsv(
+  opt("clinvar_tsv"),
+  opt("clinvar_row_limit")
+)
 clinvar37_n <- load_clinvar(
   opt("clinvar_grch37_bcf"),
   "GRCh37",
@@ -906,8 +1077,9 @@ pharmgkb_n <- load_pharmgkb(opt("pharmgkb_tsv"), opt("pharmgkb_build"))
 
 message(
   "Injected rows: seed=", seed_n,
-  ", clinvar37=", clinvar37_n,
-  ", clinvar38=", clinvar38_n,
+  ", clinvar_tsv=", clinvar_tsv_n,
+  ", clinvar37_bcf=", clinvar37_n,
+  ", clinvar38_bcf=", clinvar38_n,
   ", gwas=", gwas_n,
   ", pharmgkb=", pharmgkb_n
 )
@@ -1121,7 +1293,7 @@ exec("CHECKPOINT")
 DBI::dbDisconnect(con, shutdown = TRUE)
 
 asset_files <- c(
-  file.path(out_dir, opt("duckdb_file")),
+  if (opt("keep_duckdb")) public_duckdb_path else character(0),
   if (!opt("skip_parquet")) {
     file.path(
       out_dir,
@@ -1153,22 +1325,29 @@ utils::write.table(
   quote = FALSE
 )
 
+manifest_assets <- list(
+  variant_annotations = "public/data/variant_annotations.parquet",
+  genotype_interpretations = "public/data/genotype_interpretations.parquet",
+  variant_keys = "public/data/variant_keys.parquet",
+  asset_summary = "public/data/asset_summary.parquet",
+  source_summary = "public/data/source_summary.parquet",
+  index_summary = "public/data/index_summary.parquet",
+  size_report = rel_path(size_report_path, repo_root)
+)
+if (opt("keep_duckdb")) {
+  manifest_assets$duckdb_database <- paste0(
+    "public/data/",
+    opt("duckdb_file")
+  )
+}
+
 manifest <- list(
   name = "DuckGeneSnap locus annotation bundle",
   generated_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
   schema_version = 3,
   matching_policy = "locus_first_build_chrom_pos",
   supported_builds = unname(as.list(supported_builds)),
-  assets = list(
-    duckdb_database = paste0("public/data/", opt("duckdb_file")),
-    variant_annotations = "public/data/variant_annotations.parquet",
-    genotype_interpretations = "public/data/genotype_interpretations.parquet",
-    variant_keys = "public/data/variant_keys.parquet",
-    asset_summary = "public/data/asset_summary.parquet",
-    source_summary = "public/data/source_summary.parquet",
-    index_summary = "public/data/index_summary.parquet",
-    size_report = rel_path(size_report_path, repo_root)
-  ),
+  assets = manifest_assets,
   counts = stats::setNames(as.list(summary$row_count), summary$asset),
   sources = rows_to_lists(source_summary),
   indexes = rows_to_lists(index_specs),
@@ -1189,9 +1368,8 @@ manifest <- list(
       "injection/display/future refinement."
     ),
     paste(
-      "The browser stages the DuckDB file into the webR filesystem by",
-      "default; remote ATTACH over HTTPS can be tested separately for",
-      "larger deployments."
+      "The browser reads sorted Parquet sidecars through DuckDB; use a",
+      "range-capable static server for local testing with larger assets."
     )
   )
 )
@@ -1203,7 +1381,11 @@ jsonlite::write_json(
 )
 
 message("Wrote DuckGeneSnap assets to ", out_dir)
-message("DuckDB annotation database: ", db_path)
+if (opt("keep_duckdb")) {
+  message("DuckDB annotation database: ", db_path)
+} else {
+  message("Intermediate DuckDB database was not kept")
+}
 message("Size report: ", size_report_path)
 print(summary)
 print(source_summary)

@@ -1,7 +1,10 @@
 set column is_primary_key dictionary true
-set column source compression uncompressed
+set column annotation_id compression zstd(3)
+set column source_id compression zstd(3)
+set column variant_key_hex compression zstd(3)
 set column build compression uncompressed
-set column is_primary_key compression uncompressed
+set column chrom compression uncompressed
+set column chrom_norm compression uncompressed
 set column annotation_id statistics page
 set column source statistics page
 set column source_id statistics page
