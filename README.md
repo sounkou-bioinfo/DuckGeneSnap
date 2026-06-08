@@ -38,6 +38,12 @@ The committed asset bundle is intentionally small: 16 demo curated loci
 and 32 auxiliary VariantKey rows. Treat it as a scaffold for production
 asset builds.
 
+## Hosted site
+
+GitHub Pages is configured for the repository root:
+
+<https://sounkou-bioinfo.github.io/DuckGeneSnap/>
+
 ## Run locally
 
 Serve the repository over HTTP; do not open `index.html` with `file://`.
@@ -140,19 +146,27 @@ source chrom/pos/ref/alt
   -> optional exact-key refinement
 ```
 
-## Frontend query framework credit
+## Upstream attribution and frontend query credit
 
-The planned variant detail panels take inspiration from the lightweight
-frontend-only query orchestration in Sasha Gusev’s GWAS Lookup:
-<https://github.com/sashagusev/gwas_lookup>. DuckGeneSnap keeps that
-spirit (client-side modules, URL-stateable variant queries, parallel
-enrichment panels) but uses local DuckDB/Rduckhts assets first and calls
-external APIs only for on-demand detail enrichment.
+DuckGeneSnap is an independent static-site/DuckDB/Rduckhts
+implementation inspired by the upstream GeneSnap project by syao13:
+<https://github.com/syao13/GeneSnap>. The upstream GeneSnap README
+describes a FastAPI + SQLite + React application for parsing raw 23andMe
+data and annotating clinically significant variants. DuckGeneSnap keeps
+the user-facing idea but moves the analysis into a backend-free browser
+runtime.
+
+The planned variant detail panels also take inspiration from the
+lightweight frontend-only query orchestration in Sasha Gusev’s GWAS
+Lookup: <https://github.com/sashagusev/gwas_lookup>. DuckGeneSnap keeps
+that spirit (client-side modules, URL-stateable variant queries,
+parallel enrichment panels) but uses local DuckDB/Rduckhts assets first
+and calls external APIs only for on-demand detail enrichment.
 
 ## Related projects
 
+- Upstream GeneSnap: <https://github.com/syao13/GeneSnap>
 - DuckBedQC: <https://github.com/sounkou-bioinfo/DuckBedQC>
-- GeneSnap inspiration: <https://github.com/syao13/GeneSnap>
 - GWAS Lookup frontend inspiration:
   <https://github.com/sashagusev/gwas_lookup>
 - Rduckhts / duckhts: <https://github.com/RGenomicsETL/duckhts>
