@@ -19,8 +19,9 @@ server.
 
 - Static `index.html` with local browser-side analysis.
 - 23andMe-style raw text upload.
-- VCF/BCF upload through
-  `Rduckhts::rduckhts_bcf(..., tidy_format = TRUE)`.
+- VCF/BCF/VCF.GZ upload through
+  `Rduckhts::rduckhts_bcf(..., tidy_format = TRUE)`, including
+  DeepVariant-style `FORMAT_GT` genotype fields.
 - Locus-first matching:
   `build + normalized chromosome + 1-based position`.
 - Sorted ZSTD Parquet annotation assets staged into webR and queried
@@ -30,6 +31,7 @@ server.
   future exact-key refinement.
 - Optional VCF/BCF liftover hook using `bcftools_liftover()` when chain
   and FASTA files are supplied by the user.
+- DuckBedQC-style step timing modal and per-run timing table.
 - HTMX is included for static fragment loading; computation remains in
   the local DuckDB/webR layer.
 - Demo 23andMe-style file at `public/demo/example_23andme.txt`.
@@ -126,6 +128,7 @@ assets:
 - `public/demo/example_23andme_grch38.txt`
 - `public/demo/example_grch37.vcf`
 - `public/demo/example_grch37.bcf`
+- `public/demo/example_deepvariant_grch37.vcf.gz`
 - `public/demo/example_grch38.vcf`
 - `public/demo/example_grch38.bcf`
 
@@ -154,6 +157,11 @@ analysis_build + chrom_norm + pos
 display metadata only. `variant_keys` is kept as an auxiliary
 allele-specific table for VCF/BCF QA, detail panels, and future exact
 allele refinement.
+
+A browser-side webR REPL is intentionally out of scope for the current
+release, but the app keeps the DuckDB connection in the browser runtime
+so a future REPL panel can expose plotting, ad hoc SQL, and additional
+summary statistics.
 
 Do not lift or mutate VariantKeys directly. For allele-aware paths:
 

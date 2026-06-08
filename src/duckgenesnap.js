@@ -19,6 +19,11 @@ const state = {
   },
   lastRows: [],
   lastSummary: null,
+  timings: [],
+  operation: {
+    modal: null,
+    active: null,
+  },
 };
 
 const nodes = {};
@@ -60,9 +65,22 @@ function initNodes() {
     "results",
     "messages",
     "liftover-card",
+    "timing-card",
+    "timing-list",
+    "operation-modal",
+    "operation-modal-title",
+    "operation-modal-detail",
+    "operation-modal-state",
+    "operation-modal-elapsed",
+    "operation-modal-spinner",
   ].forEach((id) => {
     nodes[id] = byId(id);
   });
+  if (nodes["operation-modal"] && window.bootstrap?.Modal) {
+    state.operation.modal = new window.bootstrap.Modal(
+      nodes["operation-modal"],
+    );
+  }
 }
 
 function escapeHtml(value) {
@@ -90,6 +108,10 @@ function sqlString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+function sqlIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
 function sanitizeFilename(name, fallback = "upload.dat") {
   const cleaned = String(name || fallback).replace(/[^a-zA-Z0-9._-]+/g, "_");
   return cleaned || fallback;
@@ -111,6 +133,141 @@ function showMessage(message, kind = "warning") {
 
 function clearMessage() {
   nodes.messages.innerHTML = "";
+}
+
+function formatDuration(ms) {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 2)} s`;
+  const minutes = Math.floor(ms / 60000);
+  const seconds = ((ms % 60000) / 1000).toFixed(1);
+  return `${minutes}m ${seconds}s`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function renderTimingList(active = null) {
+  if (!nodes["timing-list"]) return;
+  const doneRows = state.timings.map((step) => `
+<div class="d-flex justify-content-between gap-2 border-bottom py-1">
+  <span>${escapeHtml(step.label)}</span>
+  <span class="text-${step.success ? "success" : "danger"}">${escapeHtml(formatDuration(step.durationMs))}</span>
+</div>`).join("");
+  const activeRow = active ? `
+<div class="d-flex justify-content-between gap-2 border-bottom py-1">
+  <span><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>${escapeHtml(active.label)}</span>
+  <span>${escapeHtml(formatDuration(performance.now() - active.startedAt))}</span>
+</div>` : "";
+  nodes["timing-list"].innerHTML = (doneRows || activeRow)
+    ? `${doneRows}${activeRow}`
+    : "Step timings appear here after analysis starts.";
+}
+
+function resetTimings() {
+  state.timings = [];
+  if (nodes["timing-card"]) nodes["timing-card"].hidden = false;
+  renderTimingList();
+}
+
+function recordTiming(label, detail, durationMs, success = true) {
+  state.timings.push({ label, detail, durationMs, success });
+  renderTimingList();
+}
+
+function refreshOperationElapsed() {
+  const op = state.operation.active;
+  if (!op) return;
+  const elapsed = performance.now() - op.startedAt;
+  if (nodes["operation-modal-elapsed"]) {
+    nodes["operation-modal-elapsed"].textContent = formatDuration(elapsed);
+  }
+  renderTimingList(op);
+}
+
+function beginOperation({ label, detail }) {
+  const current = state.operation.active;
+  if (current?.timerId) clearInterval(current.timerId);
+  const op = {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    label,
+    detail,
+    startedAt: performance.now(),
+    timerId: null,
+  };
+  state.operation.active = op;
+  if (nodes["operation-modal-title"]) nodes["operation-modal-title"].textContent = label;
+  if (nodes["operation-modal-detail"]) nodes["operation-modal-detail"].textContent = detail;
+  if (nodes["operation-modal-state"]) {
+    nodes["operation-modal-state"].textContent = "Running";
+    nodes["operation-modal-state"].className = "";
+  }
+  if (nodes["operation-modal-spinner"]) {
+    nodes["operation-modal-spinner"].className = "spinner-border text-dark me-3 mt-1";
+  }
+  if (nodes["operation-modal-elapsed"]) nodes["operation-modal-elapsed"].textContent = "0 ms";
+  state.operation.modal?.show();
+  op.timerId = setInterval(refreshOperationElapsed, 100);
+  renderTimingList(op);
+  return op.id;
+}
+
+function updateOperationDetail(detail, label = null) {
+  const op = state.operation.active;
+  if (!op) return;
+  if (label) {
+    op.label = label;
+    if (nodes["operation-modal-title"]) nodes["operation-modal-title"].textContent = label;
+  }
+  op.detail = detail;
+  if (nodes["operation-modal-detail"]) nodes["operation-modal-detail"].textContent = detail;
+  refreshOperationElapsed();
+}
+
+async function finishOperation(operationId, { success, summary }) {
+  const op = state.operation.active;
+  if (!op || op.id !== operationId) return 0;
+  if (op.timerId) clearInterval(op.timerId);
+  const durationMs = performance.now() - op.startedAt;
+  if (nodes["operation-modal-elapsed"]) {
+    nodes["operation-modal-elapsed"].textContent = formatDuration(durationMs);
+  }
+  if (nodes["operation-modal-state"]) {
+    nodes["operation-modal-state"].textContent = success ? "Completed" : "Failed";
+    nodes["operation-modal-state"].className = success ? "text-success" : "text-danger";
+  }
+  if (nodes["operation-modal-detail"]) {
+    nodes["operation-modal-detail"].textContent = `${summary} (${formatDuration(durationMs)})`;
+  }
+  if (nodes["operation-modal-spinner"]) {
+    nodes["operation-modal-spinner"].className = success
+      ? "bi bi-check-circle-fill text-success me-3 mt-1"
+      : "bi bi-exclamation-triangle-fill text-danger me-3 mt-1";
+  }
+  recordTiming(op.label, summary, durationMs, success);
+  await sleep(success ? 250 : 900);
+  state.operation.modal?.hide();
+  state.operation.active = null;
+  renderTimingList();
+  return durationMs;
+}
+
+async function runTimedStep({ label, detail, successSummary, failureSummary }, fn) {
+  const operationId = beginOperation({ label, detail });
+  try {
+    const result = await fn(updateOperationDetail);
+    await finishOperation(operationId, {
+      success: true,
+      summary: successSummary || detail,
+    });
+    return result;
+  } catch (error) {
+    await finishOperation(operationId, {
+      success: false,
+      summary: `${failureSummary || "Step failed"}: ${error.message ?? String(error)}`,
+    });
+    throw error;
+  }
 }
 
 function setBusy(isBusy, label = "Analyze") {
@@ -334,8 +491,19 @@ function buildRiskOrderSql(alias = "risk_level") {
 }
 
 async function analyze23AndMe(file, analysisBuild) {
-  const stats = await stage23AndMe(file);
-  await executeSql(`
+  const stats = await runTimedStep({
+    label: "Parse 23andMe text",
+    detail: "Reading chip-style genotype rows and staging them in DuckDB.",
+    successSummary: "23andMe-style rows were parsed",
+    failureSummary: "Could not parse 23andMe file",
+  }, () => stage23AndMe(file));
+  await runTimedStep({
+    label: "Join annotation assets",
+    detail: "Joining upload loci against ClinVar/GWAS Parquet annotations.",
+    successSummary: "Annotation join completed",
+    failureSummary: "Could not join annotations",
+  }, async () => {
+    await executeSql(`
 CREATE OR REPLACE TABLE analysis_matches AS
 SELECT
   '23andMe'::VARCHAR AS input_kind,
@@ -378,6 +546,7 @@ LEFT JOIN variant_keys vk
  AND vk.is_primary_key
 ORDER BY ${buildRiskOrderSql("coalesce(gi.risk_level, 'normal')")}, a.score DESC, a.gene, a.annotation_id
 `);
+  });
   return { stats, inputKind: "23andMe" };
 }
 
@@ -407,6 +576,43 @@ async function stageLiftoverFile(inputId, targetName) {
   return path;
 }
 
+function findSchemaColumn(schema, candidates) {
+  const wanted = candidates.map((value) => String(value).toLowerCase());
+  return schema.find((row) => wanted.includes(String(row.column_name).toLowerCase())) || null;
+}
+
+function columnExpression(schema, candidates, castType, fallback = null) {
+  const column = findSchemaColumn(schema, candidates);
+  if (!column) return fallback || `NULL::${castType}`;
+  return `${sqlIdentifier(column.column_name)}::${castType}`;
+}
+
+function vcfColumnExpressions(schema) {
+  const missingRequired = ["CHROM", "POS", "REF", "ALT"].filter(
+    (name) => !findSchemaColumn(schema, [name]),
+  );
+  if (missingRequired.length) {
+    throw new Error(
+      `Rduckhts did not expose required VCF columns: ${missingRequired.join(", ")}.`,
+    );
+  }
+  const altColumn = findSchemaColumn(schema, ["ALT"]);
+  const altIdent = sqlIdentifier(altColumn.column_name);
+  const altType = String(altColumn.column_type || "").toUpperCase();
+  const altIsList = altType.includes("[]") || altType.startsWith("LIST");
+  return {
+    sampleSql: columnExpression(schema, ["SAMPLE_ID", "SAMPLE", "sample_id"], "VARCHAR", "''::VARCHAR"),
+    gtSql: columnExpression(schema, ["FORMAT_GT", "GT", "GENOTYPE"], "VARCHAR", "''::VARCHAR"),
+    chromSql: columnExpression(schema, ["CHROM", "#CHROM"], "VARCHAR"),
+    posSql: columnExpression(schema, ["POS"], "BIGINT"),
+    refSql: columnExpression(schema, ["REF"], "VARCHAR"),
+    altSql: altIsList ? `${altIdent}[1]::VARCHAR` : `${altIdent}::VARCHAR`,
+    altCountSql: altIsList
+      ? `coalesce(array_length(${altIdent}), 0)`
+      : `CASE WHEN contains(${altIdent}::VARCHAR, ',') THEN 2 ELSE 1 END`,
+  };
+}
+
 function genotypeSqlFromAlleles() {
   return `
 CASE
@@ -418,22 +624,32 @@ END`;
 
 async function analyzeVcfBcf(file, inputBuild, analysisBuild, liftoverMode) {
   const filePath = `${VFS_UPLOAD}/${sanitizeFilename(file.name, "upload.vcf")}`;
-  await writeBrowserFile(file, filePath);
-  await runR(`Rduckhts::rduckhts_bcf(con, 'user_variants_raw', ${rString(filePath)}, tidy_format = TRUE, overwrite = TRUE)`);
+  await runTimedStep({
+    label: "Read VCF/BCF",
+    detail: "Staging the upload and parsing records with Rduckhts.",
+    successSummary: "VCF/BCF records are available in DuckDB",
+    failureSummary: "Could not read VCF/BCF",
+  }, async () => {
+    await writeBrowserFile(file, filePath);
+    await runR(`Rduckhts::rduckhts_bcf(con, 'user_variants_raw', ${rString(filePath)}, tidy_format = TRUE, overwrite = TRUE)`);
+  });
 
-  const needsLiftover = inputBuild !== analysisBuild && inputBuild !== "other";
+  const rawSchema = await queryJson(`DESCRIBE ${sqlIdentifier("user_variants_raw")}`);
+  const raw = vcfColumnExpressions(rawSchema);
+  const needsLiftover = inputBuild !== analysisBuild;
   let sourceSql = `
 SELECT
-  coalesce(SAMPLE_ID, '')::VARCHAR AS sample_id,
-  coalesce(GT, '')::VARCHAR AS gt,
-  CHROM::VARCHAR AS input_chrom,
-  POS::BIGINT AS input_pos,
-  REF::VARCHAR AS input_ref,
-  ALT::VARCHAR AS input_alt,
-  CHROM::VARCHAR AS chrom,
-  POS::BIGINT AS pos,
-  REF::VARCHAR AS ref,
-  ALT::VARCHAR AS alt,
+  ${raw.sampleSql} AS sample_id,
+  ${raw.gtSql} AS gt,
+  ${raw.chromSql} AS input_chrom,
+  ${raw.posSql} AS input_pos,
+  ${raw.refSql} AS input_ref,
+  ${raw.altSql} AS input_alt,
+  ${raw.chromSql} AS chrom,
+  ${raw.posSql} AS pos,
+  ${raw.refSql} AS ref,
+  ${raw.altSql} AS alt,
+  ${raw.altCountSql} AS alt_count,
   TRUE AS mapped,
   NULL::VARCHAR AS reject_reason
 FROM user_variants_raw
@@ -450,20 +666,36 @@ FROM user_variants_raw
       throw new Error("Liftover requires chain, source FASTA, and destination FASTA files. These remain local in the browser VFS.");
     }
     sourceSql = `
-WITH lifted AS (
+WITH raw_single_alt AS (
   SELECT
-    coalesce(SAMPLE_ID, '')::VARCHAR AS sample_id,
-    coalesce(GT, '')::VARCHAR AS gt,
-    CHROM::VARCHAR AS input_chrom,
-    POS::BIGINT AS input_pos,
-    REF::VARCHAR AS input_ref,
-    ALT::VARCHAR AS input_alt,
+    ${raw.sampleSql} AS sample_id,
+    ${raw.gtSql} AS gt,
+    ${raw.chromSql} AS input_chrom,
+    ${raw.posSql} AS input_pos,
+    ${raw.refSql} AS input_ref,
+    ${raw.altSql} AS input_alt,
+    ${raw.chromSql} AS chrom,
+    ${raw.posSql} AS pos,
+    ${raw.refSql} AS ref,
+    ${raw.altSql} AS alt
+  FROM user_variants_raw
+  WHERE ${raw.altCountSql} = 1
+    AND regexp_matches(upper(${raw.refSql}), '^[ACGT]+$')
+    AND regexp_matches(upper(${raw.altSql}), '^[ACGT]+$')
+), lifted AS (
+  SELECT
+    sample_id,
+    gt,
+    input_chrom,
+    input_pos,
+    input_ref,
+    input_alt,
     bcftools_liftover(
-      CHROM, POS, REF, ALT,
+      chrom, pos, ref, alt,
       ${sqlString(chainPath)}, ${sqlString(dstRefPath)}, ${sqlString(srcRefPath)},
       1, 250, false, NULL::BIGINT, false
     ) AS lo
-  FROM user_variants_raw
+  FROM raw_single_alt
 )
 SELECT
   sample_id,
@@ -476,13 +708,22 @@ SELECT
   lo.dest_pos::BIGINT AS pos,
   lo.dest_ref::VARCHAR AS ref,
   lo.dest_alt::VARCHAR AS alt,
+  1::BIGINT AS alt_count,
   lo.mapped AS mapped,
   lo.reject_reason::VARCHAR AS reject_reason
 FROM lifted
 `;
   }
 
-  await executeSql(`
+  await runTimedStep({
+    label: needsLiftover ? "Liftover and key variants" : "Normalize and key variants",
+    detail: needsLiftover
+      ? "Lifting single-ALT VCF records, normalizing chromosomes, and computing VariantKeys."
+      : "Normalizing chromosomes, filtering single-ALT records, and computing VariantKeys.",
+    successSummary: "Upload variants were normalized for locus joins",
+    failureSummary: "Could not normalize variants",
+  }, async () => {
+    await executeSql(`
 CREATE OR REPLACE TABLE user_variant_keyed AS
 WITH source_rows AS (${sourceSql}),
 filtered AS (
@@ -493,7 +734,10 @@ filtered AS (
     AND pos IS NOT NULL
     AND ref IS NOT NULL
     AND alt IS NOT NULL
+    AND alt_count = 1
     AND NOT contains(alt, ',')
+    AND regexp_matches(upper(ref), '^[ACGT]+$')
+    AND regexp_matches(upper(alt), '^[ACGT]+$')
 ), gt_parts AS (
   SELECT
     *,
@@ -527,8 +771,15 @@ SELECT
   variantkey_hex(variantkey(chrom, pos, ref, alt)) AS variant_key_hex
 FROM allele_calls
 `);
+  });
 
-  await executeSql(`
+  await runTimedStep({
+    label: "Join annotation assets",
+    detail: "Joining upload loci against ClinVar/GWAS Parquet annotations.",
+    successSummary: "Annotation join completed",
+    failureSummary: "Could not join annotations",
+  }, async () => {
+    await executeSql(`
 CREATE OR REPLACE TABLE analysis_matches AS
 SELECT
   'VCF/BCF'::VARCHAR AS input_kind,
@@ -568,6 +819,7 @@ LEFT JOIN genotype_interpretations gi
  AND gi.genotype_norm = k.genotype_norm
 ORDER BY ${buildRiskOrderSql("coalesce(gi.risk_level, 'normal')")}, a.score DESC, a.gene, a.annotation_id
 `);
+  });
 
   const keyedStats = await queryJson(`
 SELECT
@@ -629,10 +881,36 @@ function renderStats(summary) {
   return `${Number(stats.raw_records || 0).toLocaleString()} raw records; ${Number(stats.keyed_records || 0).toLocaleString()} VariantKey rows; ${Number(stats.matched_records || 0).toLocaleString()} curated matches.`;
 }
 
+function renderTimings() {
+  if (!state.timings.length) return "";
+  const rows = state.timings.map((step) => `
+<tr>
+  <td>${escapeHtml(step.label)}</td>
+  <td>${escapeHtml(step.detail)}</td>
+  <td class="text-end ${step.success ? "text-success" : "text-danger"}">${escapeHtml(formatDuration(step.durationMs))}</td>
+</tr>`).join("");
+  const totalMs = state.timings.reduce((sum, step) => sum + Number(step.durationMs || 0), 0);
+  return `
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h3 class="h5 mb-0">Step timings</h3>
+      <span class="badge text-bg-light">Total ${escapeHtml(formatDuration(totalMs))}</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-middle">
+        <thead><tr><th>Step</th><th>Details</th><th class="text-end">Time</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>
+</div>`;
+}
+
 function renderTable(rows, category) {
   const filtered = rows.filter((row) => row.category === category);
   if (!filtered.length) {
-    return `<p class="text-muted mb-0">No ${escapeHtml(categoryLabel(category).toLowerCase())} matches in the current asset bundle.</p>`;
+    return `<p class="text-muted mb-0">No ${escapeHtml(categoryLabel(category).toLowerCase())} matches in the current annotation snapshot.</p>`;
   }
   const body = filtered.map((row, idx) => `
 <tr>
@@ -720,6 +998,7 @@ function renderResults(summary, rows) {
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Pharma + traits</div><div class="display-6">${(Number(summary.pharmacogenomics_count || 0) + Number(summary.trait_count || 0)).toLocaleString()}</div></div></div></div>
   </div>
 
+  ${renderTimings()}
   <ul class="nav nav-tabs" role="tablist">${categoryTabs}</ul>
   <div class="tab-content border border-top-0 p-3 bg-white">${panes}</div>
 </section>`;
@@ -728,9 +1007,29 @@ function renderResults(summary, rows) {
 
 async function analyzeSelectedFile(file) {
   clearMessage();
+  resetTimings();
   setBusy(true, "Analyzing...");
   try {
-    await stageAssets();
+    if (!state.backend.ready) {
+      await runTimedStep({
+        label: "Start webR runtime",
+        detail: "Loading webR, DuckDB, jsonlite, and Rduckhts in the browser.",
+        successSummary: "Browser DuckDB + Rduckhts runtime is ready",
+        failureSummary: "Runtime startup failed",
+      }, () => warmBackend());
+    } else {
+      recordTiming("Start webR runtime", "Runtime was already ready", 0, true);
+    }
+    if (!state.backend.assetsReady) {
+      await runTimedStep({
+        label: "Load Parquet annotations",
+        detail: "Fetching static Parquet assets and registering DuckDB views.",
+        successSummary: "ClinVar/GWAS Parquet assets are ready",
+        failureSummary: "Could not load Parquet assets",
+      }, () => stageAssets());
+    } else {
+      recordTiming("Load Parquet annotations", "Annotation assets were already loaded", 0, true);
+    }
     const inputKind = detectInputKind(file, nodes["input-kind"].value);
     const inputBuild = nodes["input-build"].value;
     const analysisBuild = nodes["analysis-build"].value;
@@ -743,7 +1042,16 @@ async function analyzeSelectedFile(file) {
       ? await analyze23AndMe(file, analysisBuild)
       : await analyzeVcfBcf(file, inputBuild, analysisBuild, nodes["liftover-mode"].value);
 
-    const { summary, rows } = await collectResults({ ...context, analysisBuild });
+    const { summary, rows } = await runTimedStep({
+      label: "Summarize results",
+      detail: "Collecting summary counts and table rows for display.",
+      successSummary: "Result tables are ready",
+      failureSummary: "Could not summarize results",
+    }, () => collectResults({
+      ...context,
+      analysisBuild,
+      timings: state.timings.slice(),
+    }));
     renderResults(summary, rows);
     setStatus("Analysis complete. Results were generated locally in browser DuckDB.", "success");
   } catch (error) {
@@ -780,6 +1088,9 @@ function resetUi() {
   nodes["download-button"].disabled = true;
   state.lastRows = [];
   state.lastSummary = null;
+  state.timings = [];
+  if (nodes["timing-card"]) nodes["timing-card"].hidden = true;
+  renderTimingList();
   setStatus("Ready. Choose a 23andMe text file or VCF/BCF and analyze locally.", "secondary");
 }
 

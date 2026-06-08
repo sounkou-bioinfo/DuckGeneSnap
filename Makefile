@@ -10,6 +10,7 @@ check:
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document', quiet = TRUE)"
 	node --check src/duckgenesnap.js
 	duckdb < sql/locus_join.sql >/dev/null
+	Rscript scripts/smoke_vcf_ingest.R
 
 serve:
 	Rscript -e "goserveR::runServer(dir='.', prefix='/', addr='127.0.0.1:8000')"
