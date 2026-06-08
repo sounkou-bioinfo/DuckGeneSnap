@@ -26,8 +26,9 @@ examples/tests.
 VCF/BCF inputs are filtered to called alternate records and matched by
 exact `variant_key` when REF/ALT alleles are available. Results are
 searchable, paged, and exportable as TSV, CSV, Excel, or Parquet.
-Advanced local helpers cover VCF/BCF liftover and chip-to-VCF
-cleanup/harmonization.
+Advanced local tools write lifted VCF/TSV/Parquet and convert
+23andMe-style text to VCF + QC TSV using DuckHTS reference and
+normalization UDFs.
 
 ## Hosted site
 

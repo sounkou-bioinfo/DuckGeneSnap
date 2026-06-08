@@ -430,12 +430,34 @@ async function stageAssets() {
   state.backend.assetsReady = true;
 }
 
+async function fileTextMaybeGzip(file) {
+  if (file.name.toLowerCase().endsWith(".gz") && "DecompressionStream" in window) {
+    const stream = file.stream().pipeThrough(new DecompressionStream("gzip"));
+    return new Response(stream).text();
+  }
+  return file.text();
+}
+
 function normalizeGenotype(genotype) {
   const gt = String(genotype || "").trim().toUpperCase();
   if (/^[ACGT]{2}$/.test(gt)) {
     return gt.split("").sort().join("");
   }
   return gt;
+}
+
+function chipQueryChrom(chrom, style) {
+  const raw = String(chrom || "").trim();
+  const noChr = raw.replace(/^chr/i, "");
+  if (style === "add_chr") {
+    if (/^chr/i.test(raw)) return raw;
+    if (/^(M|MT)$/i.test(noChr)) return "chrM";
+    return `chr${noChr}`;
+  }
+  if (style === "remove_chr") {
+    return /^M$/i.test(noChr) ? "MT" : noChr;
+  }
+  return raw;
 }
 
 function parse23AndMe(text) {
@@ -486,8 +508,72 @@ function rowsToTsv(rows, columns) {
   return `${columns.join("\t")}\n${rows.map((row) => columns.map((col) => escapeCell(row[col])).join("\t")).join("\n")}\n`;
 }
 
+function parseChipForVcf(text, chromStyle) {
+  const rows = [];
+  const stats = {
+    total_lines: 0,
+    data_lines: 0,
+    staged_rows: 0,
+    skipped_comments: 0,
+    skipped_malformed: 0,
+  };
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    stats.total_lines += 1;
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("#")) {
+      stats.skipped_comments += 1;
+      continue;
+    }
+    const parts = line.split(/\t|\s+/);
+    if (["rsid", "id", "marker", "marker_id"].includes(parts[0]?.toLowerCase())) continue;
+    stats.data_lines += 1;
+    if (parts.length < 4) {
+      stats.skipped_malformed += 1;
+      continue;
+    }
+    const [marker_id, chrom, posText, genotypeRaw] = parts;
+    const pos = Number.parseInt(posText, 10);
+    if (!Number.isFinite(pos) || pos <= 0 || !chrom) {
+      stats.skipped_malformed += 1;
+      continue;
+    }
+    const genotype = String(genotypeRaw || "").trim().toUpperCase();
+    const isSnvCall = /^[ACGT]{2}$/.test(genotype);
+    rows.push({
+      row_id: rows.length + 1,
+      marker_id,
+      chrom,
+      query_chrom: chipQueryChrom(chrom, chromStyle),
+      pos,
+      bed_start: pos - 1,
+      bed_end: pos,
+      genotype,
+      allele1: isSnvCall ? genotype.slice(0, 1) : "",
+      allele2: isSnvCall ? genotype.slice(1, 2) : "",
+      genotype_norm: normalizeGenotype(genotype),
+      input_status: genotype === "--" ? "no_call" : isSnvCall ? "called_snv" : "not_biallelic_snv",
+    });
+  }
+  stats.staged_rows = rows.length;
+  return { rows, stats };
+}
+
+function chipBedRows(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    const key = `${row.query_chrom}\t${row.bed_start}\t${row.bed_end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ chrom: row.query_chrom, start: row.bed_start, end: row.bed_end });
+  }
+  return out;
+}
+
 async function stage23AndMe(file) {
-  const text = await file.text();
+  const text = await fileTextMaybeGzip(file);
   const parsed = parse23AndMe(text);
   if (!parsed.rows.length) {
     throw new Error("No analyzable genotype rows with chromosome/position were found in the 23andMe-style file.");
@@ -617,7 +703,7 @@ function selectedOptionalFile(id) {
   return input?.files?.[0] || null;
 }
 
-async function stageLiftoverAsset(inputId, urlId, targetName) {
+async function stageToolAsset(inputId, urlId, targetName, label = "asset") {
   const file = selectedOptionalFile(inputId);
   if (file) {
     const path = `${VFS_UPLOAD}/${targetName}_${sanitizeFilename(file.name)}`;
@@ -631,10 +717,10 @@ async function stageLiftoverAsset(inputId, urlId, targetName) {
   try {
     parsed = new URL(url);
   } catch (_) {
-    throw new Error(`Invalid liftover URL: ${url}`);
+    throw new Error(`Invalid ${label} URL: ${url}`);
   }
   if (!/^https?:$/.test(parsed.protocol)) {
-    throw new Error(`Liftover URL must use http(s): ${url}`);
+    throw new Error(`${label} URL must use http(s): ${url}`);
   }
   const filename = sanitizeFilename(parsed.pathname.split("/").pop(), `${targetName}.dat`);
   const path = `${VFS_UPLOAD}/${targetName}_${filename}`;
@@ -647,6 +733,10 @@ async function stageLiftoverAsset(inputId, urlId, targetName) {
     new Uint8Array(await response.arrayBuffer()),
   );
   return path;
+}
+
+async function stageLiftoverAsset(inputId, urlId, targetName) {
+  return stageToolAsset(inputId, urlId, targetName, "liftover asset");
 }
 
 function findSchemaColumn(schema, candidates) {
@@ -1747,25 +1837,397 @@ SELECT
   count(*) FILTER (WHERE NOT mapped)::BIGINT AS rejected_records
 FROM liftover_results
 `);
-    const format = byId("liftover-output-format")?.value || "tsv";
-    const ext = format === "parquet" ? "parquet" : "tsv";
-    const outputPath = `${VFS_ROOT}/duckgenesnap_liftover_${Date.now()}.${ext}`;
-    const copyOptions = format === "parquet"
-      ? "FORMAT PARQUET, COMPRESSION ZSTD"
-      : "HEADER, DELIMITER '\t'";
-    await executeSql(`COPY (SELECT * FROM liftover_results ORDER BY input_chrom, input_pos) TO ${sqlString(outputPath)} (${copyOptions})`);
-    const bytes = await state.backend.webR.FS.readFile(outputPath);
-    downloadBlob(
-      new Blob([bytes], {
-        type: format === "parquet" ? "application/vnd.apache.parquet" : "text/tab-separated-values;charset=utf-8",
-      }),
-      `duckgenesnap_liftover.${ext}`,
-    );
+    const format = byId("liftover-output-format")?.value || "vcf";
+    const stamp = Date.now();
+    if (format === "vcf") {
+      await executeSql(`
+CREATE OR REPLACE TABLE liftover_vcf_records AS
+SELECT *
+FROM liftover_results
+WHERE mapped
+  AND chrom IS NOT NULL
+  AND pos IS NOT NULL
+  AND ref IS NOT NULL
+  AND alt IS NOT NULL
+  AND regexp_matches(upper(ref), '^[ACGT]+$')
+  AND regexp_matches(upper(alt), '^[ACGT]+$')
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE liftover_vcf_normalized AS
+SELECT
+  *,
+  pos_normed::BIGINT AS vcf_pos,
+  ref_normed::VARCHAR AS vcf_ref,
+  alt_normed[1]::VARCHAR AS vcf_alt
+FROM duckhts_bcftools_norm(
+  'liftover_vcf_records',
+  ${sqlString(dstRefPath)},
+  chrom_col := 'chrom',
+  pos_col := 'pos',
+  ref_col := 'ref',
+  alt_col := 'alt'
+)
+WHERE array_length(alt_normed) = 1
+`);
+      const sampleRows = await queryJson(`
+SELECT coalesce(nullif(sample_id, ''), 'SAMPLE') AS sample_id
+FROM liftover_vcf_normalized
+GROUP BY 1
+ORDER BY 1
+LIMIT 2
+`);
+      const sampleId = vcfSampleId(sampleRows.length === 1 ? sampleRows[0].sample_id : "SAMPLE");
+      const outputPath = `${VFS_ROOT}/duckgenesnap_liftover_${stamp}.vcf.body.tsv`;
+      await executeSql(`
+COPY (
+  SELECT
+    chrom AS "#CHROM",
+    vcf_pos AS POS,
+    '.' AS ID,
+    vcf_ref AS REF,
+    vcf_alt AS ALT,
+    '.' AS QUAL,
+    'PASS' AS FILTER,
+    'INPUT=' || input_chrom || ':' || input_pos::VARCHAR || ':' || input_ref || ':' || input_alt || ';RC=' || reverse_complemented::VARCHAR || ';SWAP=' || swapped::VARCHAR || ';NORM_STATUS=' || coalesce(norm_status, '') AS INFO,
+    'GT' AS FORMAT,
+    coalesce(nullif(gt, ''), './.') AS ${sqlIdentifier(sampleId)}
+  FROM liftover_vcf_normalized
+  ORDER BY chrom, vcf_pos, vcf_ref, vcf_alt
+) TO ${sqlString(outputPath)} (HEADER, DELIMITER '\t')
+`);
+      const body = textDecoder.decode(await state.backend.webR.FS.readFile(outputPath));
+      const header = [
+        "##fileformat=VCFv4.2",
+        "##source=DuckGeneSnap",
+        "##FILTER=<ID=PASS,Description=\"All filters passed\">",
+        "##INFO=<ID=INPUT,Number=1,Type=String,Description=\"Original input chrom:pos:ref:alt\">",
+        "##INFO=<ID=RC,Number=1,Type=String,Description=\"Liftover reverse-complemented the record\">",
+        "##INFO=<ID=SWAP,Number=1,Type=String,Description=\"Liftover swapped REF/ALT orientation\">",
+        "##INFO=<ID=NORM_STATUS,Number=1,Type=String,Description=\"DuckHTS bcftools_norm status\">",
+        "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
+      ].join("\n");
+      downloadBlob(new Blob([`${header}\n${body}`], { type: "text/vcf;charset=utf-8" }), "duckgenesnap_liftover.vcf");
+    } else {
+      const ext = format === "parquet" ? "parquet" : "tsv";
+      const outputPath = `${VFS_ROOT}/duckgenesnap_liftover_${stamp}.${ext}`;
+      const copyOptions = format === "parquet"
+        ? "FORMAT PARQUET, COMPRESSION ZSTD"
+        : "HEADER, DELIMITER '\t'";
+      await executeSql(`COPY (SELECT * FROM liftover_results ORDER BY input_chrom, input_pos) TO ${sqlString(outputPath)} (${copyOptions})`);
+      const bytes = await state.backend.webR.FS.readFile(outputPath);
+      downloadBlob(
+        new Blob([bytes], {
+          type: format === "parquet" ? "application/vnd.apache.parquet" : "text/tab-separated-values;charset=utf-8",
+        }),
+        `duckgenesnap_liftover.${ext}`,
+      );
+    }
     const c = counts[0] || {};
-    status.innerHTML = `<div class="alert alert-success small mb-0">Downloaded lifted ${escapeHtml(ext.toUpperCase())}: ${Number(c.raw_records || 0).toLocaleString()} raw records, ${Number(c.lifted_records || 0).toLocaleString()} concrete records, ${Number(c.mapped_records || 0).toLocaleString()} mapped, ${Number(c.rejected_records || 0).toLocaleString()} rejected.</div>`;
+    const label = format === "vcf" ? "VCF" : format === "parquet" ? "PARQUET" : "TSV";
+    status.innerHTML = `<div class="alert alert-success small mb-0">Downloaded lifted ${escapeHtml(label)}: ${Number(c.raw_records || 0).toLocaleString()} raw records, ${Number(c.lifted_records || 0).toLocaleString()} concrete records, ${Number(c.mapped_records || 0).toLocaleString()} mapped, ${Number(c.rejected_records || 0).toLocaleString()} rejected.</div>`;
   } catch (error) {
     console.error(error);
     status.innerHTML = `<div class="alert alert-danger small mb-0">${escapeHtml(error.message || String(error))}</div>`;
+  }
+}
+
+function vcfSampleId(value) {
+  return sanitizeFilename(value || "SAMPLE", "SAMPLE").replace(/^[.]+/, "") || "SAMPLE";
+}
+
+async function runChipToVcfTool() {
+  const status = byId("chip-vcf-status");
+  const input = byId("chip-vcf-input-file")?.files?.[0];
+  if (!status) return;
+  if (!input) {
+    status.innerHTML = `<div class="alert alert-warning small mb-0">Choose a 23andMe-style text file first.</div>`;
+    return;
+  }
+  status.innerHTML = `<div class="text-muted small"><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Preparing chip conversion...</div>`;
+  const button = byId("chip-vcf-run-button");
+  if (button) button.disabled = true;
+
+  try {
+    if (!state.backend.ready) await warmBackend();
+    const chromStyle = byId("chip-vcf-chrom-style")?.value || "keep";
+    const buildLabel = byId("chip-vcf-build")?.value || "custom";
+    const sampleId = vcfSampleId(byId("chip-vcf-sample-id")?.value || "SAMPLE");
+    const emitHomAlt = byId("chip-vcf-emit-hom-alt")?.checked !== false;
+    const refPath = await stageToolAsset("chip-vcf-ref-file", "chip-vcf-ref-url", "chip_ref", "reference FASTA");
+    if (!refPath) throw new Error("Choose a reference FASTA file or URL.");
+
+    const parsed = parseChipForVcf(await fileTextMaybeGzip(input), chromStyle);
+    if (!parsed.rows.length) {
+      throw new Error("No chip rows with marker, chromosome, position, and genotype were found.");
+    }
+    const chipPath = `${VFS_UPLOAD}/chip_to_vcf_${Date.now()}.tsv`;
+    const bedPath = `${VFS_UPLOAD}/chip_to_vcf_${Date.now()}.bed`;
+    await state.backend.webR.FS.writeFile(
+      chipPath,
+      textEncoder.encode(rowsToTsv(parsed.rows, [
+        "row_id",
+        "marker_id",
+        "chrom",
+        "query_chrom",
+        "pos",
+        "bed_start",
+        "bed_end",
+        "genotype",
+        "allele1",
+        "allele2",
+        "genotype_norm",
+        "input_status",
+      ])),
+    );
+    await state.backend.webR.FS.writeFile(
+      bedPath,
+      textEncoder.encode(chipBedRows(parsed.rows).map((row) => `${row.chrom}\t${row.start}\t${row.end}`).join("\n") + "\n"),
+    );
+
+    await runTimedStep({
+      label: "Read chip and FASTA",
+      detail: "Staging chip SNP calls and fetching reference bases with DuckHTS fasta_nuc().",
+      successSummary: "Chip calls and reference bases are staged",
+      failureSummary: "Could not stage chip conversion inputs",
+    }, async () => {
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_vcf_input AS
+SELECT
+  row_id::BIGINT AS row_id,
+  marker_id::VARCHAR AS marker_id,
+  chrom::VARCHAR AS chrom,
+  query_chrom::VARCHAR AS query_chrom,
+  pos::BIGINT AS pos,
+  bed_start::BIGINT AS bed_start,
+  bed_end::BIGINT AS bed_end,
+  genotype::VARCHAR AS genotype,
+  allele1::VARCHAR AS allele1,
+  allele2::VARCHAR AS allele2,
+  genotype_norm::VARCHAR AS genotype_norm,
+  input_status::VARCHAR AS input_status
+FROM read_csv_auto(${sqlString(chipPath)}, delim='\t', header=true)
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_ref_bases AS
+SELECT
+  chrom::VARCHAR AS query_chrom,
+  (start + 1)::BIGINT AS pos,
+  upper(seq::VARCHAR) AS ref_base
+FROM fasta_nuc(${sqlString(refPath)}, bed_path := ${sqlString(bedPath)}, include_seq := true)
+`);
+    });
+
+    await runTimedStep({
+      label: "Harmonize chip alleles",
+      detail: "Classifying SNP calls, normalizing variants, and validating REF/ALT with DuckHTS UDFs.",
+      successSummary: "Chip alleles are harmonized",
+      failureSummary: "Could not harmonize chip alleles",
+    }, async () => {
+      const emitHomAltSql = emitHomAlt ? "TRUE" : "FALSE";
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_harmonized AS
+WITH joined AS (
+  SELECT
+    c.*,
+    r.ref_base,
+    CASE c.allele1 WHEN 'A' THEN 'T' WHEN 'C' THEN 'G' WHEN 'G' THEN 'C' WHEN 'T' THEN 'A' ELSE NULL END AS allele1_rc,
+    CASE c.allele2 WHEN 'A' THEN 'T' WHEN 'C' THEN 'G' WHEN 'G' THEN 'C' WHEN 'T' THEN 'A' ELSE NULL END AS allele2_rc
+  FROM chip_vcf_input c
+  LEFT JOIN chip_ref_bases r
+    ON r.query_chrom = c.query_chrom
+   AND r.pos = c.pos
+), classified AS (
+  SELECT
+    *,
+    CASE
+      WHEN input_status <> 'called_snv' THEN input_status
+      WHEN ref_base IS NULL THEN 'missing_reference'
+      WHEN NOT regexp_matches(ref_base, '^[ACGT]$') THEN 'non_acgt_reference'
+      WHEN allele1 = ref_base AND allele2 = ref_base THEN 'hom_ref'
+      WHEN allele1 = ref_base OR allele2 = ref_base THEN 'called_alt'
+      WHEN allele1 <> allele2 AND (allele1_rc = ref_base OR allele2_rc = ref_base) THEN 'called_alt'
+      WHEN allele1 = allele2 AND ${emitHomAltSql} THEN 'called_alt'
+      WHEN allele1 = allele2 THEN 'hom_alt_skipped'
+      ELSE 'reference_mismatch'
+    END AS status,
+    CASE
+      WHEN allele1 = ref_base OR allele2 = ref_base THEN 'forward'
+      WHEN allele1 <> allele2 AND (allele1_rc = ref_base OR allele2_rc = ref_base) THEN 'reverse_complement'
+      WHEN allele1 = allele2 AND ${emitHomAltSql} THEN 'forward_assumed_hom_alt'
+      ELSE NULL
+    END AS orientation,
+    CASE
+      WHEN allele1 = ref_base OR allele2 = ref_base THEN false
+      WHEN allele1 <> allele2 AND (allele1_rc = ref_base OR allele2_rc = ref_base) THEN true
+      ELSE false
+    END AS reverse_complemented,
+    ref_base AS ref,
+    CASE
+      WHEN allele1 = ref_base AND allele2 <> ref_base THEN allele2
+      WHEN allele2 = ref_base AND allele1 <> ref_base THEN allele1
+      WHEN allele1_rc = ref_base AND allele2_rc <> ref_base THEN allele2_rc
+      WHEN allele2_rc = ref_base AND allele1_rc <> ref_base THEN allele1_rc
+      WHEN allele1 = allele2 AND allele1 <> ref_base AND ${emitHomAltSql} THEN allele1
+      ELSE NULL
+    END AS alt,
+    CASE
+      WHEN allele1 = allele2 AND allele1 <> ref_base AND ${emitHomAltSql} THEN '1/1'
+      WHEN allele1 = ref_base OR allele2 = ref_base OR allele1_rc = ref_base OR allele2_rc = ref_base THEN '0/1'
+      ELSE NULL
+    END AS gt,
+    CASE
+      WHEN allele1 = allele2 AND allele1 <> ref_base AND ${emitHomAltSql} THEN 'homozygous non-reference emitted assuming chip alleles are forward-strand'
+      WHEN allele1 <> allele2 AND (allele1_rc = ref_base OR allele2_rc = ref_base) THEN 'reverse-complemented to match reference FASTA'
+      ELSE NULL
+    END AS note
+  FROM joined
+)
+SELECT * FROM classified
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_vcf_records AS
+SELECT *
+FROM chip_harmonized
+WHERE status = 'called_alt'
+  AND ref IS NOT NULL
+  AND alt IS NOT NULL
+  AND ref <> alt
+  AND regexp_matches(ref, '^[ACGT]$')
+  AND regexp_matches(alt, '^[ACGT]$')
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_vcf_normalized AS
+SELECT
+  *,
+  pos_normed::BIGINT AS final_pos,
+  ref_normed::VARCHAR AS final_ref,
+  alt_normed[1]::VARCHAR AS final_alt
+FROM duckhts_bcftools_norm(
+  'chip_vcf_records',
+  ${sqlString(refPath)},
+  chrom_col := 'query_chrom',
+  pos_col := 'pos',
+  ref_col := 'ref',
+  alt_col := 'alt'
+)
+WHERE array_length(alt_normed) = 1
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_vcf_munge AS
+SELECT *
+FROM duckdb_munge(
+  ${sqlString("(SELECT query_chrom AS CHR, final_pos AS BP, row_id::VARCHAR AS SNP, final_alt AS A1, final_ref AS A2 FROM chip_vcf_normalized) AS chip_munge_input")},
+  column_map := map(['CHR','BP','A1','A2','SNP'], ['CHR','BP','A1','A2','SNP']),
+  fasta_ref := ${sqlString(refPath)}
+)
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_vcf_final AS
+SELECT
+  n.*,
+  n.final_pos AS vcf_pos,
+  n.final_ref AS vcf_ref,
+  n.final_alt AS vcf_alt,
+  m.alleles_swapped AS munge_alleles_swapped,
+  m.filter AS munge_filter
+FROM chip_vcf_normalized n
+JOIN chip_vcf_munge m
+  ON m.id = n.row_id::VARCHAR
+WHERE m.filter IS NULL
+  AND m.ref = n.final_ref
+  AND m.alt = n.final_alt
+`);
+      await executeSql(`
+CREATE OR REPLACE TABLE chip_conversion_qc AS
+SELECT
+  h.row_id,
+  h.marker_id,
+  h.chrom,
+  h.query_chrom,
+  h.pos,
+  h.genotype,
+  h.ref_base,
+  h.ref,
+  h.alt,
+  n.final_pos AS normalized_pos,
+  n.final_ref AS normalized_ref,
+  n.final_alt AS normalized_alt,
+  n.normed,
+  n.norm_status,
+  h.gt,
+  h.status,
+  h.orientation,
+  h.reverse_complemented,
+  m.alleles_swapped AS munge_alleles_swapped,
+  m.filter AS munge_filter,
+  f.row_id IS NOT NULL AS vcf_written,
+  h.note
+FROM chip_harmonized h
+LEFT JOIN chip_vcf_normalized n
+  ON n.row_id = h.row_id
+LEFT JOIN chip_vcf_munge m
+  ON m.id = h.row_id::VARCHAR
+LEFT JOIN chip_vcf_final f
+  ON f.row_id = h.row_id
+`);
+    });
+
+    const counts = await queryJson(`
+SELECT
+  (SELECT count(*) FROM chip_vcf_input)::BIGINT AS staged_rows,
+  (SELECT count(*) FROM chip_vcf_final)::BIGINT AS vcf_records,
+  count(*) FILTER (WHERE status = 'called_alt')::BIGINT AS called_alt_candidates,
+  count(*) FILTER (WHERE status = 'hom_ref')::BIGINT AS hom_ref,
+  count(*) FILTER (WHERE status = 'no_call')::BIGINT AS no_call,
+  count(*) FILTER (WHERE status IN ('reference_mismatch', 'missing_reference', 'non_acgt_reference', 'hom_alt_skipped', 'not_biallelic_snv'))::BIGINT AS skipped_or_flagged
+FROM chip_conversion_qc
+`);
+
+    const stamp = Date.now();
+    const vcfBodyPath = `${VFS_ROOT}/duckgenesnap_chip_${stamp}.vcf.body.tsv`;
+    const qcPath = `${VFS_ROOT}/duckgenesnap_chip_qc_${stamp}.tsv`;
+    await executeSql(`
+COPY (
+  SELECT
+    query_chrom AS "#CHROM",
+    vcf_pos AS POS,
+    marker_id AS ID,
+    vcf_ref AS REF,
+    vcf_alt AS ALT,
+    '.' AS QUAL,
+    'PASS' AS FILTER,
+    'BUILD=${buildLabel};ORIENTATION=' || coalesce(orientation, '') || ';NORM_STATUS=' || coalesce(norm_status, '') AS INFO,
+    'GT' AS FORMAT,
+    gt AS ${sqlIdentifier(sampleId)}
+  FROM chip_vcf_final
+  ORDER BY query_chrom, vcf_pos, marker_id
+) TO ${sqlString(vcfBodyPath)} (HEADER, DELIMITER '\t')
+`);
+    await executeSql(`COPY (SELECT * FROM chip_conversion_qc ORDER BY row_id) TO ${sqlString(qcPath)} (HEADER, DELIMITER '\t')`);
+
+    const vcfBody = textDecoder.decode(await state.backend.webR.FS.readFile(vcfBodyPath));
+    const qcBytes = await state.backend.webR.FS.readFile(qcPath);
+    const vcfHeader = [
+      "##fileformat=VCFv4.2",
+      "##source=DuckGeneSnap",
+      `##reference=${sanitizeFilename(refPath.split("/").pop(), "reference.fa")}`,
+      `##duckgenesnap_build=${buildLabel}`,
+      "##FILTER=<ID=PASS,Description=\"All filters passed\">",
+      "##INFO=<ID=BUILD,Number=1,Type=String,Description=\"Input build label supplied in DuckGeneSnap\">",
+      "##INFO=<ID=ORIENTATION,Number=1,Type=String,Description=\"Allele orientation used during chip conversion\">",
+      "##INFO=<ID=NORM_STATUS,Number=1,Type=String,Description=\"DuckHTS bcftools_norm status\">",
+      "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
+    ].join("\n");
+    downloadBlob(new Blob([`${vcfHeader}\n${vcfBody}`], { type: "text/vcf;charset=utf-8" }), `duckgenesnap_chip_${buildLabel}.vcf`);
+    downloadBlob(new Blob([qcBytes], { type: "text/tab-separated-values;charset=utf-8" }), `duckgenesnap_chip_${buildLabel}_qc.tsv`);
+
+    const c = counts[0] || {};
+    status.innerHTML = `<div class="alert alert-success small mb-0">Downloaded VCF and QC TSV: ${Number(c.vcf_records || 0).toLocaleString()} VCF records from ${Number(c.staged_rows || 0).toLocaleString()} staged chip rows; ${Number(c.hom_ref || 0).toLocaleString()} hom-ref, ${Number(c.no_call || 0).toLocaleString()} no-call, ${Number(c.skipped_or_flagged || 0).toLocaleString()} skipped/flagged.</div>`;
+  } catch (error) {
+    console.error(error);
+    status.innerHTML = `<div class="alert alert-danger small mb-0">${escapeHtml(error.message || String(error))}</div>`;
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -1947,6 +2409,11 @@ function bindAdvancedTools() {
   if (liftoverButton && !liftoverButton.dataset.bound) {
     liftoverButton.dataset.bound = "true";
     liftoverButton.addEventListener("click", runLiftoverTool);
+  }
+  const chipButton = byId("chip-vcf-run-button");
+  if (chipButton && !chipButton.dataset.bound) {
+    chipButton.dataset.bound = "true";
+    chipButton.addEventListener("click", runChipToVcfTool);
   }
   const button = byId("litvar2-search-button");
   const input = byId("litvar2-query");

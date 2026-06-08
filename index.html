@@ -63,7 +63,7 @@
               <input class="form-control form-control-lg" type="file" id="file-input" accept=".txt,.tsv,.vcf,.bcf,.gz" />
               <div class="form-text">
                 Your file is read by your browser and staged into webR's in-memory filesystem. It is not uploaded to a server.
-                VCF/BCF is preferred; 23andMe text support is a convenience path, and users who need allele-aware calls should convert chip files to VCF with trusted local build metadata.
+                VCF/BCF is preferred. For allele-aware chip calls, use Advanced local tools to convert 23andMe-style text to VCF with the matching reference FASTA.
               </div>
             </div>
 
@@ -140,7 +140,7 @@
           <div class="card-header bg-white d-flex justify-content-between align-items-center gap-2">
             <div>
               <h2 class="h5 mb-0">Advanced local tools</h2>
-              <div class="small text-muted">Optional liftover conversion and chip-to-VCF guidance.</div>
+              <div class="small text-muted">Optional VCF liftover and chip-to-VCF conversion.</div>
             </div>
             <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#advanced-tools-body" aria-expanded="false" aria-controls="advanced-tools-body">
               Show tools

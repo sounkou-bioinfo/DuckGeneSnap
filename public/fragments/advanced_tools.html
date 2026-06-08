@@ -17,7 +17,7 @@
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="chip-vcf-tool-tab" data-bs-toggle="tab" data-bs-target="#chip-vcf-tool-pane" type="button" role="tab">
-        23andMe to VCF guidance
+        23andMe to VCF
       </button>
     </li>
   </ul>
@@ -27,7 +27,7 @@
       <h3 class="h6">Convert a VCF/BCF to another build</h3>
       <p class="text-muted small mb-3">
         Upload a VCF/BCF plus chain, source FASTA, and destination FASTA assets. DuckGeneSnap will run the Rduckhts
-        <code>bcftools_liftover()</code> row kernel locally and download a lifted variant table. Upload the lifted output to the main annotation workflow when builds match.
+        <code>bcftools_liftover()</code> row kernel locally, normalize lifted variants, and download VCF, TSV, or Parquet. Upload the lifted output to the main annotation workflow when builds match.
       </p>
       <div class="row g-3">
         <div class="col-lg-4">
@@ -37,7 +37,8 @@
         <div class="col-lg-4">
           <label class="form-label" for="liftover-output-format">Download format</label>
           <select class="form-select" id="liftover-output-format">
-            <option value="tsv" selected>Lifted TSV</option>
+            <option value="vcf" selected>Lifted VCF</option>
+            <option value="tsv">Lifted TSV</option>
             <option value="parquet">Lifted Parquet</option>
           </select>
         </div>
@@ -72,12 +73,50 @@
 
     <div class="tab-pane fade" id="chip-vcf-tool-pane" role="tabpanel" aria-labelledby="chip-vcf-tool-tab">
       <h3 class="h6">23andMe text cleanup and VCF conversion</h3>
-      <p class="small text-muted">
-        23andMe-style text upload is locus-only. For allele-aware matching, use the DuckHTS UDF path with the correct build and reference FASTA to harmonize chip alleles, flag swaps/reverse complements, and write VCF/BCF. Upload that converted file to the main annotator.
+      <p class="small text-muted mb-3">
+        Upload chip text plus the matching reference FASTA. DuckGeneSnap uses DuckHTS UDFs to fetch REF bases, harmonize called SNP alleles, normalize variants, validate REF/ALT, and download a VCF plus QC TSV.
       </p>
-      <p class="small text-muted mb-0">
-        Ambiguous probes still need manifest/dbSNP allele metadata; the FASTA handles reference checks, not probe identity.
-      </p>
+      <div class="row g-3">
+        <div class="col-lg-4">
+          <label class="form-label" for="chip-vcf-input-file">23andMe-style text</label>
+          <input class="form-control" id="chip-vcf-input-file" type="file" accept=".txt,.tsv,.csv,.gz" />
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="chip-vcf-build">Build label</label>
+          <select class="form-select" id="chip-vcf-build">
+            <option value="GRCh37" selected>GRCh37</option>
+            <option value="GRCh38">GRCh38</option>
+            <option value="custom">custom</option>
+          </select>
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="chip-vcf-chrom-style">FASTA chromosome names</label>
+          <select class="form-select" id="chip-vcf-chrom-style">
+            <option value="keep" selected>same as chip file</option>
+            <option value="add_chr">add chr prefix</option>
+            <option value="remove_chr">remove chr prefix</option>
+          </select>
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="chip-vcf-ref-file">Reference FASTA</label>
+          <input class="form-control mb-2" id="chip-vcf-ref-file" type="file" accept=".fa,.fasta,.fna,.gz" />
+          <input class="form-control" id="chip-vcf-ref-url" type="url" placeholder="https://.../GRCh37.fa.gz" />
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="chip-vcf-sample-id">Sample ID</label>
+          <input class="form-control" id="chip-vcf-sample-id" type="text" value="SAMPLE" />
+        </div>
+        <div class="col-lg-4 d-flex align-items-end">
+          <div class="form-check">
+            <input class="form-check-input" id="chip-vcf-emit-hom-alt" type="checkbox" checked />
+            <label class="form-check-label" for="chip-vcf-emit-hom-alt">Emit homozygous non-reference SNPs</label>
+          </div>
+        </div>
+        <div class="col-lg-4 d-flex align-items-end">
+          <button class="btn btn-outline-primary" id="chip-vcf-run-button" type="button">Convert and download</button>
+        </div>
+      </div>
+      <div class="small mt-3" id="chip-vcf-status">Chip conversion status will appear here.</div>
     </div>
   </div>
 </div>
