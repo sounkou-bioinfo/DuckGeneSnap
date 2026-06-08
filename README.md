@@ -50,19 +50,14 @@ server.
   liftover conversion and 23andMe-to-VCF guidance. LitVar2 lookup
   links/API attempts live in each variant detail panel instead of a
   separate global lookup tool.
-- Demo 23andMe-style file at `public/demo/example_23andme.txt`. DuckHTS
-  `duckdb_munge` is for GWAS summary statistics rather than personal
-  genotype calls, but its reference-harmonization pattern is relevant
-  for a future local chip-to-VCF converter: with a reference FASTA, plus
-  chip manifest or dbSNP allele metadata for ambiguous cases, the app
-  can detect swaps/reverse complements and emit unambiguous called SNPs
-  as VCF/BCF.
+- Small synthetic chip/VCF/BCF inputs live under `public/demo/`; they
+  are test inputs, not the annotation source.
 
-The committed annotation assets include ClinVar variant-summary rows for
-GRCh37 and GRCh38 (pathogenic/likely pathogenic, drug response, risk
-factor, and association records), GWAS Catalog associations filtered at
-genome-wide significance, and a small GRCh37 seed set used by the local
-demo files.
+The committed annotation assets are real data: ClinVar variant-summary
+rows for GRCh37 and GRCh38, plus GWAS Catalog associations filtered at
+genome-wide significance. A small manually curated GRCh37 seed table is
+included only for smoke tests/examples and is not the main annotation
+set.
 
 ## Hosted site
 
