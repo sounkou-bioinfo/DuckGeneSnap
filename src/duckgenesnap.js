@@ -1336,8 +1336,8 @@ function renderResults(summary, rows) {
     </div>
   </div>
 
-  ${renderTimings()}
   ${renderResultsTable(rows)}
+  ${renderTimings()}
 </section>`;
   bindResultControls();
 }
