@@ -47,6 +47,9 @@ queried locally. No genotype data is uploaded to a server.
   and Parquet exports near the result table.
 - VCF/gVCF record filtering defaults to called alternate variants only, which
   skips gVCF reference blocks, symbolic alleles, hom-ref genotypes, and no-calls.
+  VCF/BCF annotation matches require an exact allele `variant_key` match when an
+  annotation has REF/ALT alleles, so same-locus different-allele calls are not
+  reported as hits.
 - Collapsed HTMX-loaded advanced helper workflows, including VCF/BCF liftover
   inputs, 23andMe-to-VCF guidance, and live NCBI/NLM LitVar2 lookup links/API
   calls when browser CORS permits them; core computation remains in the local
@@ -169,8 +172,11 @@ analysis_build + chrom_norm + pos
 ```
 
 `source_id` may contain rsIDs or source-specific identifiers, but it is display
-metadata only. `variant_keys` is kept as an auxiliary allele-specific table for
-VCF/BCF QA, detail panels, and future exact allele refinement.
+metadata only. For VCF/BCF uploads, DuckGeneSnap refines locus hits with exact
+`variant_key` allele matching when ClinVar/seed annotations have REF/ALT keys,
+so same-locus different-allele records are not reported as hits. For direct
+23andMe text uploads, matching remains locus-only because chip text lacks a full
+REF/ALT representation.
 
 A browser-side webR REPL is intentionally out of scope for the current release,
 but the app keeps the DuckDB connection in the browser runtime so a future REPL

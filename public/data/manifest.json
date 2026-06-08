@@ -1,8 +1,8 @@
 {
   "name": "DuckGeneSnap locus annotation bundle",
-  "generated_at": "2026-06-08T12:25:53Z",
+  "generated_at": "2026-06-08T14:27:27Z",
   "schema_version": 3,
-  "matching_policy": "locus_first_build_chrom_pos",
+  "matching_policy": "locus_first_with_vcf_variantkey_refinement",
   "supported_builds": [
     "GRCh37",
     "GRCh38"
@@ -19,19 +19,19 @@
   "counts": {
     "genotype_interpretations": 51,
     "index_summary": 4,
-    "variant_annotations": 1599759,
-    "variant_keys": 881438
+    "variant_annotations": 1820395,
+    "variant_keys": 1392488
   },
   "sources": [
     {
       "source": "clinvar",
       "build": "GRCh37",
-      "row_count": 408502
+      "row_count": 507892
     },
     {
       "source": "clinvar",
       "build": "GRCh38",
-      "row_count": 386647
+      "row_count": 507893
     },
     {
       "source": "gwas_catalog",
@@ -78,8 +78,8 @@
   "sizes": [
     {
       "file": "variant_annotations.parquet",
-      "bytes": 57275402,
-      "mib": 54.622
+      "bytes": 66873668,
+      "mib": 63.776
     },
     {
       "file": "genotype_interpretations.parquet",
@@ -88,12 +88,12 @@
     },
     {
       "file": "variant_keys.parquet",
-      "bytes": 9431974,
-      "mib": 8.995
+      "bytes": 15208692,
+      "mib": 14.504
     },
     {
       "file": "asset_summary.parquet",
-      "bytes": 484,
+      "bytes": 486,
       "mib": 0
     },
     {
@@ -107,5 +107,5 @@
       "mib": 0.001
     }
   ],
-  "notes": ["Core ingestion matches on genome build, normalized chromosome, and 1-based position.", "source_id is metadata only and is not part of the ingestion join.", "variant_keys is an auxiliary allele-specific table for injection/display/future refinement.", "The browser reads sorted Parquet sidecars through DuckDB; use a range-capable static server for local testing with larger assets."]
+  "notes": ["Core ingestion matches on genome build, normalized chromosome, and 1-based position; VCF/BCF runtime joins also require exact variant_key allele agreement when annotation REF/ALT keys exist.", "source_id is metadata only and is not part of the ingestion join.", "variant_keys is an auxiliary allele-specific table for injection/display/future refinement.", "The browser reads sorted Parquet sidecars through DuckDB; use a range-capable static server for local testing with larger assets."]
 }

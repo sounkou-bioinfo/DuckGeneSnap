@@ -39,7 +39,9 @@ server.
   `.xlsx`, and Parquet exports near the result table.
 - VCF/gVCF record filtering defaults to called alternate variants only,
   which skips gVCF reference blocks, symbolic alleles, hom-ref
-  genotypes, and no-calls.
+  genotypes, and no-calls. VCF/BCF annotation matches require an exact
+  allele `variant_key` match when an annotation has REF/ALT alleles, so
+  same-locus different-allele calls are not reported as hits.
 - Collapsed HTMX-loaded advanced helper workflows, including VCF/BCF
   liftover inputs, 23andMe-to-VCF guidance, and live NCBI/NLM LitVar2
   lookup links/API calls when browser CORS permits them; core
@@ -122,10 +124,10 @@ Parquet row group trade-offs.
 
 | file                             |    bytes |    mib |
 |:---------------------------------|---------:|-------:|
-| variant_annotations.parquet      | 57275402 | 54.622 |
+| variant_annotations.parquet      | 66873668 | 63.776 |
 | genotype_interpretations.parquet |     3367 |  0.003 |
-| variant_keys.parquet             |  9431974 |  8.995 |
-| asset_summary.parquet            |      484 |  0.000 |
+| variant_keys.parquet             | 15208692 | 14.504 |
+| asset_summary.parquet            |      486 |  0.000 |
 | source_summary.parquet           |      554 |  0.001 |
 | index_summary.parquet            |     1262 |  0.001 |
 
@@ -166,9 +168,12 @@ analysis_build + chrom_norm + pos
 ```
 
 `source_id` may contain rsIDs or source-specific identifiers, but it is
-display metadata only. `variant_keys` is kept as an auxiliary
-allele-specific table for VCF/BCF QA, detail panels, and future exact
-allele refinement.
+display metadata only. For VCF/BCF uploads, DuckGeneSnap refines locus
+hits with exact `variant_key` allele matching when ClinVar/seed
+annotations have REF/ALT keys, so same-locus different-allele records
+are not reported as hits. For direct 23andMe text uploads, matching
+remains locus-only because chip text lacks a full REF/ALT
+representation.
 
 A browser-side webR REPL is intentionally out of scope for the current
 release, but the app keeps the DuckDB connection in the browser runtime

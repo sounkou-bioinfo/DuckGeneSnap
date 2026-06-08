@@ -518,6 +518,7 @@ function buildRiskOrderSql(alias = "risk_level") {
 
 function annotationRiskSql() {
   return `coalesce(gi.risk_level, CASE
+    WHEN a.significance = 'conflicting' THEN 'annotation_match'
     WHEN a.significance = 'pathogenic' THEN 'high_risk'
     WHEN a.significance = 'likely_pathogenic' THEN 'increased_risk'
     WHEN a.significance = 'drug_response' THEN 'drug_response'
@@ -528,6 +529,8 @@ function annotationRiskSql() {
 
 function annotationInterpretationSql() {
   return `coalesce(gi.interpretation, CASE
+    WHEN a.significance = 'conflicting' THEN
+      'Input genotype matched a ClinVar locus with conflicting classifications. Do not treat this as pathogenic without clinical review.'
     WHEN a.significance IN ('pathogenic', 'likely_pathogenic') THEN
       'Input genotype matched a ClinVar pathogenicity locus. This is not medical advice; confirm with clinical-grade testing.'
     WHEN a.significance = 'drug_response' THEN
@@ -899,6 +902,10 @@ JOIN variant_annotations a
   ON a.build = ${sqlString(analysisBuild)}
  AND a.chrom_norm = k.chrom_norm
  AND a.pos = k.pos
+JOIN variant_keys vk_exact
+  ON vk_exact.annotation_id = a.annotation_id
+ AND vk_exact.build = a.build
+ AND vk_exact.variant_key = k.variant_key
 LEFT JOIN genotype_interpretations gi
   ON gi.annotation_id = a.annotation_id
  AND gi.genotype_norm = k.genotype_norm
@@ -1013,6 +1020,7 @@ SELECT
   count(*) FILTER (WHERE category = 'health_risk')::BIGINT AS health_risk_count,
   count(*) FILTER (WHERE category = 'pharmacogenomics')::BIGINT AS pharmacogenomics_count,
   count(*) FILTER (WHERE category = 'trait')::BIGINT AS trait_count,
+  count(*) FILTER (WHERE category = 'uncertain')::BIGINT AS uncertain_count,
   count(*) FILTER (WHERE risk_level = 'high_risk')::BIGINT AS high_risk_count
 FROM analysis_matches
 ${whereSql}
@@ -1253,11 +1261,18 @@ function renderResults(summary, rows) {
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Curated matches${summary.searchText ? " shown" : ""}</div><div class="display-6">${total.toLocaleString()}</div><div class="small text-muted">Rows ${pageStart.toLocaleString()}-${pageEnd.toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">High risk</div><div class="display-6 text-danger">${Number(summary.high_risk_count || 0).toLocaleString()}</div></div></div></div>
     <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Health</div><div class="display-6">${Number(summary.health_risk_count || 0).toLocaleString()}</div></div></div></div>
-    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Pharma + traits</div><div class="display-6">${(Number(summary.pharmacogenomics_count || 0) + Number(summary.trait_count || 0)).toLocaleString()}</div></div></div></div>
+    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Pharma + traits</div><div class="display-6">${(Number(summary.pharmacogenomics_count || 0) + Number(summary.trait_count || 0)).toLocaleString()}</div><div class="small text-muted">Uncertain ${Number(summary.uncertain_count || 0).toLocaleString()}</div></div></div></div>
   </div>
 
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <button type="button" class="btn btn-sm ${filters.category ? "btn-outline-secondary" : "btn-primary"}" data-result-category="">All ${total.toLocaleString()}</button>
+        <button type="button" class="btn btn-sm ${filters.category === "health_risk" ? "btn-primary" : "btn-outline-secondary"}" data-result-category="health_risk">Health ${Number(summary.health_risk_count || 0).toLocaleString()}</button>
+        <button type="button" class="btn btn-sm ${filters.category === "pharmacogenomics" ? "btn-primary" : "btn-outline-secondary"}" data-result-category="pharmacogenomics">Pharma ${Number(summary.pharmacogenomics_count || 0).toLocaleString()}</button>
+        <button type="button" class="btn btn-sm ${filters.category === "trait" ? "btn-primary" : "btn-outline-secondary"}" data-result-category="trait">GWAS/traits ${Number(summary.trait_count || 0).toLocaleString()}</button>
+        <button type="button" class="btn btn-sm ${filters.category === "uncertain" ? "btn-primary" : "btn-outline-secondary"}" data-result-category="uncertain">Uncertain ${Number(summary.uncertain_count || 0).toLocaleString()}</button>
+      </div>
       <div class="row g-2 align-items-end">
         <div class="col-lg-4">
           <label class="form-label" for="result-search">Global search</label>
@@ -1274,7 +1289,7 @@ function renderResults(summary, rows) {
         <div class="col-lg-2">
           <label class="form-label" for="filter-category">Category</label>
           <select id="filter-category" class="form-select">
-            ${selectOptions(["", "health_risk", "pharmacogenomics", "trait"], filters.category, { "": "any" })}
+            ${selectOptions(["", "health_risk", "pharmacogenomics", "trait", "uncertain"], filters.category, { "": "any" })}
           </select>
         </div>
         <div class="col-lg-2">
@@ -1286,7 +1301,7 @@ function renderResults(summary, rows) {
         <div class="col-lg-2">
           <label class="form-label" for="filter-significance">Significance</label>
           <select id="filter-significance" class="form-select">
-            ${selectOptions(["", "pathogenic", "likely_pathogenic", "drug_response", "risk_factor", "association"], filters.significance, { "": "any" })}
+            ${selectOptions(["", "pathogenic", "likely_pathogenic", "drug_response", "risk_factor", "association", "conflicting"], filters.significance, { "": "any" })}
           </select>
         </div>
         <div class="col-lg-2">
@@ -1700,6 +1715,13 @@ function bindResultControls() {
       if (node) node.value = "";
     });
     applyResultFilters({ limit: byId("result-page-size")?.value || 250, offset: 0 });
+  });
+  document.querySelectorAll("[data-result-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const f = readResultFilters(0);
+      f.category = button.dataset.resultCategory || "";
+      applyResultFilters(f);
+    });
   });
   byId("result-prev-page")?.addEventListener("click", () => {
     const f = normalizeResultFilters(state.resultFilters);

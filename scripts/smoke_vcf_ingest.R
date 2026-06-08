@@ -20,11 +20,16 @@ on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 invisible(Rduckhts::rduckhts_load(con))
 
 ann_path <- file.path(repo, "public/data/variant_annotations.parquet")
+keys_path <- file.path(repo, "public/data/variant_keys.parquet")
 fixture <- file.path(repo, "public/demo/example_deepvariant_grch37.vcf.gz")
 
 invisible(DBI::dbExecute(con, sprintf(
   "CREATE OR REPLACE VIEW variant_annotations AS SELECT * FROM read_parquet(%s)",
   DBI::dbQuoteString(con, ann_path)
+)))
+invisible(DBI::dbExecute(con, sprintf(
+  "CREATE OR REPLACE VIEW variant_keys AS SELECT * FROM read_parquet(%s)",
+  DBI::dbQuoteString(con, keys_path)
 )))
 Rduckhts::rduckhts_bcf(
   con,
@@ -111,6 +116,10 @@ JOIN variant_annotations a
   ON a.build = 'GRCh37'
  AND a.chrom_norm = k.chrom_norm
  AND a.pos = k.pos
+JOIN variant_keys vk_exact
+  ON vk_exact.annotation_id = a.annotation_id
+ AND vk_exact.build = a.build
+ AND vk_exact.variant_key = k.variant_key
 "))
 
 counts <- DBI::dbGetQuery(con, "
