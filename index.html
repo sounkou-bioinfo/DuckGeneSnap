@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="author" content="DuckGeneSnap contributors" />
+  <title>DuckGeneSnap</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces&display=swap" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  <style>
+    body { background: #f8fafc; }
+    .brand {
+      font-family: "Fraunces", serif;
+      font-size: clamp(3rem, 8vw, 5.5rem);
+      letter-spacing: -0.07em;
+      color: #1d4ed8;
+    }
+    .hero-card { background: linear-gradient(135deg, #eef2ff, #ecfeff); }
+    .feature-icon { font-size: 2.25rem; color: #1d4ed8; }
+    code { color: #0f172a; }
+    table { font-size: 0.95rem; }
+    .collapse-row:hover { --bs-table-hover-bg: transparent; }
+  </style>
+</head>
+<body>
+  <header class="container py-5">
+    <div class="text-center py-4">
+      <h1 class="brand fw-bold mb-3">DuckGeneSnap</h1>
+      <p class="lead mx-auto mb-3" style="max-width: 850px;">
+        A backend-free GeneSnap-style genome snapshot: upload 23andMe text or VCF/BCF,
+        join against curated Parquet assets with DuckDB, and use Rduckhts VariantKeys in the browser.
+      </p>
+      <div class="d-flex flex-wrap justify-content-center gap-3 small">
+        <a href="https://github.com/sounkou-bioinfo/DuckGeneSnap" class="link-dark" target="_blank" rel="noopener noreferrer">DuckGeneSnap repo</a>
+        <a href="https://github.com/sounkou-bioinfo/DuckBedQC" class="link-dark" target="_blank" rel="noopener noreferrer">DuckBedQC pattern</a>
+        <a href="https://github.com/syao13/GeneSnap" class="link-dark" target="_blank" rel="noopener noreferrer">GeneSnap inspiration</a>
+        <a href="https://github.com/sashagusev/gwas_lookup" class="link-dark" target="_blank" rel="noopener noreferrer">GWAS Lookup frontend inspiration</a>
+        <a href="https://github.com/RGenomicsETL/duckhts" class="link-dark" target="_blank" rel="noopener noreferrer">Rduckhts / duckhts</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container pb-5">
+    <section class="card hero-card border-0 shadow-sm mb-4">
+      <div class="card-body p-4 p-lg-5">
+        <div class="row g-4 align-items-start">
+          <div class="col-lg-8">
+            <h2 class="h4 mb-3">Analyze locally</h2>
+            <div id="runtime-status" class="alert alert-secondary mb-3">Preparing page...</div>
+            <div id="messages"></div>
+
+            <div class="mb-3">
+              <label for="file-input" class="form-label fw-semibold">Input file</label>
+              <input class="form-control form-control-lg" type="file" id="file-input" accept=".txt,.tsv,.vcf,.bcf,.gz" />
+              <div class="form-text">Your file is read by your browser and staged into webR's in-memory filesystem. It is not uploaded to a server.</div>
+            </div>
+
+            <div class="row g-3 mb-3">
+              <div class="col-md-4">
+                <label for="input-kind" class="form-label">Input type</label>
+                <select id="input-kind" class="form-select">
+                  <option value="auto">auto-detect</option>
+                  <option value="23andme">23andMe raw text</option>
+                  <option value="vcf_bcf">VCF / BCF</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label for="input-build" class="form-label">Input build</label>
+                <select id="input-build" class="form-select">
+                  <option value="GRCh37">GRCh37</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label for="analysis-build" class="form-label">Analysis build</label>
+                <select id="analysis-build" class="form-select">
+                  <option value="GRCh37">GRCh37</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="row g-3 align-items-end">
+              <div class="col-md-4">
+                <label for="liftover-mode" class="form-label">VCF/BCF liftover</label>
+                <select id="liftover-mode" class="form-select">
+                  <option value="off">off</option>
+                  <option value="auto">auto when builds differ</option>
+                </select>
+              </div>
+              <div class="col-md-8 d-flex flex-wrap gap-2">
+                <button id="analyze-button" type="button" class="btn btn-primary btn-lg">Analyze locally</button>
+                <button id="demo-button" type="button" class="btn btn-outline-dark btn-lg">Load demo 23andMe</button>
+                <button id="reset-button" type="button" class="btn btn-outline-secondary btn-lg">Reset</button>
+                <button id="download-button" type="button" class="btn btn-outline-success btn-lg" disabled>Download TSV</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-4">
+            <div class="card border-0 shadow-sm mb-3">
+              <div class="card-body">
+                <h3 class="h6 text-uppercase text-muted">Asset bundle</h3>
+                <div id="asset-status" class="small text-muted">Loading manifest...</div>
+                <hr />
+                <p class="small mb-0">
+                  Static assets are locus-first: <code>build + chrom + pos</code>.
+                  <code>variant_keys.parquet</code> is auxiliary for allele-aware display,
+                  QA, and future exact-key refinement.
+                </p>
+              </div>
+            </div>
+            <div class="card border-warning bg-warning-subtle">
+              <div class="card-body small">
+                <strong>Not medical advice.</strong> This demo is informational only and uses a small curated asset bundle.
+                Clinically significant results should be confirmed with clinical-grade testing and reviewed with a qualified professional.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt-4" id="liftover-card" hidden>
+          <div class="card-body">
+            <h3 class="h5">Advanced VCF/BCF liftover assets</h3>
+            <p class="text-muted small mb-3">
+              If the uploaded VCF/BCF build differs from the analysis bundle, DuckGeneSnap can call
+              <code>bcftools_liftover()</code> in Rduckhts. Provide a chain file plus source and destination FASTA files.
+              These files remain local in the browser VFS. For 23andMe files, matching remains build/chrom/position based.
+            </p>
+            <div class="row g-3">
+              <div class="col-lg-4">
+                <label class="form-label" for="chain-file">Chain file</label>
+                <input class="form-control" id="chain-file" type="file" accept=".chain,.gz" />
+              </div>
+              <div class="col-lg-4">
+                <label class="form-label" for="src-ref-file">Source FASTA</label>
+                <input class="form-control" id="src-ref-file" type="file" accept=".fa,.fasta,.fna,.gz" />
+              </div>
+              <div class="col-lg-4">
+                <label class="form-label" for="dst-ref-file">Destination FASTA</label>
+                <input class="form-control" id="dst-ref-file" type="file" accept=".fa,.fasta,.fna,.gz" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="row g-4 mb-4">
+      <div class="col-md-4">
+        <div class="card h-100 border-0 shadow-sm">
+          <div class="card-body">
+            <i class="bi bi-shield-lock feature-icon"></i>
+            <h3 class="h5 mt-3">Private by construction</h3>
+            <p class="mb-0">There is no FastAPI, SQLite server, or upload endpoint. webR, DuckDB, and Rduckhts run inside the page.</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card h-100 border-0 shadow-sm">
+          <div class="card-body">
+            <i class="bi bi-key feature-icon"></i>
+            <h3 class="h5 mt-3">VariantKey-first joins</h3>
+            <p class="mb-0">Uploads are matched by genome build, normalized chromosome, and 1-based position using DuckDB indexes or Parquet row-group statistics.</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card h-100 border-0 shadow-sm">
+          <div class="card-body">
+            <i class="bi bi-diagram-3 feature-icon"></i>
+            <h3 class="h5 mt-3">Schema-ready liftover</h3>
+            <p class="mb-0">When strict coordinate conversion is needed, recompute VariantKeys after Rduckhts liftover rather than lifting keys themselves.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="results"></section>
+
+    <aside class="mt-5" hx-get="public/fragments/disclaimer.html" hx-trigger="load" hx-swap="innerHTML">
+      <noscript>Enable JavaScript to load the full disclaimer.</noscript>
+    </aside>
+  </main>
+
+  <footer class="container py-4 text-muted small">
+    <div class="d-flex flex-wrap justify-content-between gap-2">
+      <span>DuckGeneSnap: static DuckDB/Rduckhts genomics demo.</span>
+      <span>Inspired by DuckBedQC and GeneSnap.</span>
+    </div>
+  </footer>
+
+  <script type="module" src="src/duckgenesnap.js"></script>
+</body>
+</html>

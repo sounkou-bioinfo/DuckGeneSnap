@@ -1,0 +1,37 @@
+Wrote prescription to docs/parquet-linter/current/genotype_interpretations.prescription
+warning missing-page-statistics
+  --> column[0]("annotation_id")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column annotation_id statistics page
+
+warning missing-page-statistics
+  --> column[1]("source_id")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column source_id statistics page
+
+warning missing-page-statistics
+  --> column[2]("genotype")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column genotype statistics page
+
+warning missing-page-statistics
+  --> column[3]("genotype_norm")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column genotype_norm statistics page
+
+warning missing-page-statistics
+  --> column[4]("interpretation")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column interpretation statistics page
+
+warning missing-page-statistics
+  --> column[5]("risk_level")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column risk_level statistics page
+
+warning oversized-string-statistics
+  --> column[4]("interpretation")
+  string statistics are large (up to min: 71B, max: 93B) in 1/1 row groups and untruncated; consider truncating to 64 bytes
+  fix: set file statistics_truncate_length 64
+
+7 issue(s) found.

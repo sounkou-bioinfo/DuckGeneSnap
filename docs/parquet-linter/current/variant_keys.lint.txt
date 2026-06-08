@@ -1,0 +1,87 @@
+Wrote prescription to docs/parquet-linter/current/variant_keys.prescription
+suggestion dictionary-encoding-cardinality
+  --> column[11]("is_primary_key")
+  low cardinality (~2 distinct / 32 non-null = 6%) and no dictionary in 1/1 row groups; consider enabling dictionary encoding
+  fix: set column is_primary_key dictionary true
+
+warning low-compression-ratio
+  --> column[1]("source")
+  aggregated compression ratio is 1.38 (ZSTD(ZstdLevel(1))) across 1/1 row groups; data is nearly incompressible
+  fix: set column source compression uncompressed
+
+warning low-compression-ratio
+  --> column[3]("build")
+  aggregated compression ratio is 1.37 (ZSTD(ZstdLevel(1))) across 1/1 row groups; data is nearly incompressible
+  fix: set column build compression uncompressed
+
+warning low-compression-ratio
+  --> column[11]("is_primary_key")
+  aggregated compression ratio is 1.33 (ZSTD(ZstdLevel(1))) across 1/1 row groups; data is nearly incompressible
+  fix: set column is_primary_key compression uncompressed
+
+warning missing-page-statistics
+  --> column[0]("annotation_id")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column annotation_id statistics page
+
+warning missing-page-statistics
+  --> column[1]("source")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column source statistics page
+
+warning missing-page-statistics
+  --> column[2]("source_id")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column source_id statistics page
+
+warning missing-page-statistics
+  --> column[3]("build")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column build statistics page
+
+warning missing-page-statistics
+  --> column[4]("chrom")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column chrom statistics page
+
+warning missing-page-statistics
+  --> column[5]("chrom_norm")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column chrom_norm statistics page
+
+warning missing-page-statistics
+  --> column[6]("pos")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column pos statistics page
+
+warning missing-page-statistics
+  --> column[7]("ref")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column ref statistics page
+
+warning missing-page-statistics
+  --> column[8]("alt")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column alt statistics page
+
+warning missing-page-statistics
+  --> column[9]("variant_key")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column variant_key statistics page
+
+warning missing-page-statistics
+  --> column[10]("variant_key_hex")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column variant_key_hex statistics page
+
+warning missing-page-statistics
+  --> column[11]("is_primary_key")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column is_primary_key statistics page
+
+warning missing-page-statistics
+  --> column[12]("key_role")
+  no page-level column index found in 1/1 row groups; page statistics are missing
+  fix: set column key_role statistics page
+
+17 issue(s) found.

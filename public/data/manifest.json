@@ -1,0 +1,101 @@
+{
+  "name": "DuckGeneSnap locus annotation bundle",
+  "generated_at": "2026-06-08T11:56:20Z",
+  "schema_version": 3,
+  "matching_policy": "locus_first_build_chrom_pos",
+  "supported_builds": [
+    "GRCh37"
+  ],
+  "assets": {
+    "duckdb_database": "public/data/duckgenesnap.duckdb",
+    "variant_annotations": "public/data/variant_annotations.parquet",
+    "genotype_interpretations": "public/data/genotype_interpretations.parquet",
+    "variant_keys": "public/data/variant_keys.parquet",
+    "asset_summary": "public/data/asset_summary.parquet",
+    "source_summary": "public/data/source_summary.parquet",
+    "index_summary": "public/data/index_summary.parquet",
+    "size_report": "public/data/size_report.tsv"
+  },
+  "counts": {
+    "genotype_interpretations": 51,
+    "index_summary": 4,
+    "variant_annotations": 16,
+    "variant_keys": 32
+  },
+  "sources": [
+    {
+      "source": "seed",
+      "build": "GRCh37",
+      "row_count": 16
+    }
+  ],
+  "indexes": [
+    {
+      "index_name": "idx_ann_locus",
+      "table_name": "variant_annotations",
+      "columns": "build, chrom_norm, pos",
+      "purpose": "Batch exact locus joins from uploaded 23andMe/VCF rows."
+    },
+    {
+      "index_name": "idx_interp_annotation_genotype",
+      "table_name": "genotype_interpretations",
+      "columns": "annotation_id, genotype_norm",
+      "purpose": "Genotype-specific interpretation after annotation match."
+    },
+    {
+      "index_name": "idx_vk_variantkey",
+      "table_name": "variant_keys",
+      "columns": "build, variant_key",
+      "purpose": "Optional allele-exact VariantKey lookup and QA."
+    },
+    {
+      "index_name": "idx_vk_annotation",
+      "table_name": "variant_keys",
+      "columns": "annotation_id",
+      "purpose": "Detail-panel lookup of auxiliary key rows for one annotation."
+    }
+  ],
+  "parquet": {
+    "row_group_size": 50000,
+    "compression": "zstd",
+    "compression_level": 22
+  },
+  "sizes": [
+    {
+      "file": "duckgenesnap.duckdb",
+      "bytes": 3682304,
+      "mib": 3.512
+    },
+    {
+      "file": "variant_annotations.parquet",
+      "bytes": 6742,
+      "mib": 0.006
+    },
+    {
+      "file": "genotype_interpretations.parquet",
+      "bytes": 3367,
+      "mib": 0.003
+    },
+    {
+      "file": "variant_keys.parquet",
+      "bytes": 3199,
+      "mib": 0.003
+    },
+    {
+      "file": "asset_summary.parquet",
+      "bytes": 477,
+      "mib": 0
+    },
+    {
+      "file": "source_summary.parquet",
+      "bytes": 481,
+      "mib": 0
+    },
+    {
+      "file": "index_summary.parquet",
+      "bytes": 1262,
+      "mib": 0.001
+    }
+  ],
+  "notes": ["Core ingestion matches on genome build, normalized chromosome, and 1-based position.", "source_id is metadata only and is not part of the ingestion join.", "variant_keys is an auxiliary allele-specific table for injection/display/future refinement.", "The browser stages the DuckDB file into the webR filesystem by default; remote ATTACH over HTTPS can be tested separately for larger deployments."]
+}

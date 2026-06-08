@@ -1,0 +1,7 @@
+set column annotation_id statistics page
+set column source_id statistics page
+set column genotype statistics page
+set column genotype_norm statistics page
+set column interpretation statistics page
+set column risk_level statistics page
+set file statistics_truncate_length 64

@@ -1,0 +1,27 @@
+set column source_payload dictionary true
+set column odds_ratio encoding byte_stream_split
+set column score encoding byte_stream_split
+set column source compression uncompressed
+set column build compression uncompressed
+set column source_payload compression uncompressed
+set column annotation_id statistics page
+set column source statistics page
+set column source_id statistics page
+set column build statistics page
+set column chrom statistics page
+set column chrom_norm statistics page
+set column pos statistics page
+set column gene statistics page
+set column category statistics page
+set column name statistics page
+set column significance statistics page
+set column description statistics page
+set column risk_allele statistics page
+set column normal_allele statistics page
+set column external_ids statistics page
+set column publications statistics page
+set column clinvar_stars statistics page
+set column odds_ratio statistics page
+set column score statistics page
+set column source_payload statistics page
+set file statistics_truncate_length 64

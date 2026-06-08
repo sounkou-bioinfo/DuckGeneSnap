@@ -1,0 +1,177 @@
+Wrote prescription to docs/parquet-linter/size-tests/clinvar_gwas_variant_annotations.prescription
+suggestion float-byte-stream-split
+  --> column[17]("odds_ratio")
+  scalar float column uses PLAIN without BYTE_STREAM_SPLIT in 22/23 row groups; BYTE_STREAM_SPLIT typically compresses 2-4x better
+  fix: set column odds_ratio encoding byte_stream_split
+
+suggestion compression-codec-upgrade
+  --> column[0]("annotation_id")
+  using ZSTD(ZstdLevel(1)) in 23/23 row groups; default compression policy prefers ZSTD level 3; recommend switching to ZSTD level 3 (column size 46.6MB)
+  fix: set column annotation_id compression zstd(3)
+
+suggestion compression-codec-upgrade
+  --> column[2]("source_id")
+  using ZSTD(ZstdLevel(1)) in 23/23 row groups; default compression policy prefers ZSTD level 3; recommend switching to ZSTD level 3 (column size 14.6MB)
+  fix: set column source_id compression zstd(3)
+
+suggestion compression-codec-upgrade
+  --> column[11]("description")
+  using ZSTD(ZstdLevel(1)) in 23/23 row groups; default compression policy prefers ZSTD level 3; recommend switching to ZSTD level 3 (column size 192.5MB)
+  fix: set column description compression zstd(3)
+
+suggestion compression-codec-upgrade
+  --> column[14]("external_ids")
+  using ZSTD(ZstdLevel(1)) in 23/23 row groups; default compression policy prefers ZSTD level 3; recommend switching to ZSTD level 3 (column size 61.2MB)
+  fix: set column external_ids compression zstd(3)
+
+suggestion compression-codec-upgrade
+  --> column[19]("source_payload")
+  using ZSTD(ZstdLevel(1)) in 23/23 row groups; default compression policy prefers ZSTD level 3; recommend switching to ZSTD level 3 (column size 79.8MB)
+  fix: set column source_payload compression zstd(3)
+
+warning low-compression-ratio
+  --> column[3]("build")
+  aggregated compression ratio is 1.33 (ZSTD(ZstdLevel(1))) across 23/23 row groups; data is nearly incompressible
+  fix: set column build compression uncompressed
+
+warning low-compression-ratio
+  --> column[4]("chrom")
+  aggregated compression ratio is 1.30 (ZSTD(ZstdLevel(1))) across 23/23 row groups; data is nearly incompressible
+  fix: set column chrom compression uncompressed
+
+warning low-compression-ratio
+  --> column[5]("chrom_norm")
+  aggregated compression ratio is 1.30 (ZSTD(ZstdLevel(1))) across 23/23 row groups; data is nearly incompressible
+  fix: set column chrom_norm compression uncompressed
+
+warning missing-page-statistics
+  --> column[0]("annotation_id")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column annotation_id statistics page
+
+warning missing-page-statistics
+  --> column[1]("source")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column source statistics page
+
+warning missing-page-statistics
+  --> column[2]("source_id")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column source_id statistics page
+
+warning missing-page-statistics
+  --> column[3]("build")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column build statistics page
+
+warning missing-page-statistics
+  --> column[4]("chrom")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column chrom statistics page
+
+warning missing-page-statistics
+  --> column[5]("chrom_norm")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column chrom_norm statistics page
+
+warning missing-page-statistics
+  --> column[6]("pos")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column pos statistics page
+
+warning missing-page-statistics
+  --> column[7]("gene")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column gene statistics page
+
+warning missing-page-statistics
+  --> column[8]("category")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column category statistics page
+
+warning missing-page-statistics
+  --> column[9]("name")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column name statistics page
+
+warning missing-page-statistics
+  --> column[10]("significance")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column significance statistics page
+
+warning missing-page-statistics
+  --> column[11]("description")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column description statistics page
+
+warning missing-page-statistics
+  --> column[12]("risk_allele")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column risk_allele statistics page
+
+warning missing-page-statistics
+  --> column[13]("normal_allele")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column normal_allele statistics page
+
+warning missing-page-statistics
+  --> column[14]("external_ids")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column external_ids statistics page
+
+warning missing-page-statistics
+  --> column[15]("publications")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column publications statistics page
+
+warning missing-page-statistics
+  --> column[16]("clinvar_stars")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column clinvar_stars statistics page
+
+warning missing-page-statistics
+  --> column[17]("odds_ratio")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column odds_ratio statistics page
+
+warning missing-page-statistics
+  --> column[18]("score")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column score statistics page
+
+warning missing-page-statistics
+  --> column[19]("source_payload")
+  no page-level column index found in 23/23 row groups; page statistics are missing
+  fix: set column source_payload statistics page
+
+warning oversized-string-statistics
+  --> column[9]("name")
+  string statistics are large (up to min: 129B, max: 59B) in 2/23 row groups and untruncated; consider truncating to 64 bytes
+  fix: set file statistics_truncate_length 64
+
+warning oversized-string-statistics
+  --> column[11]("description")
+  string statistics are large (up to min: 214B, max: 215B) in 22/23 row groups and untruncated; consider truncating to 64 bytes
+  fix: set file statistics_truncate_length 64
+
+warning oversized-string-statistics
+  --> column[12]("risk_allele")
+  string statistics are large (up to min: 1B, max: 256B) in 4/23 row groups and untruncated; consider truncating to 64 bytes
+  fix: set file statistics_truncate_length 64
+
+warning oversized-string-statistics
+  --> column[13]("normal_allele")
+  string statistics are large (up to min: 1B, max: 256B) in 5/23 row groups and untruncated; consider truncating to 64 bytes
+  fix: set file statistics_truncate_length 64
+
+warning oversized-string-statistics
+  --> column[14]("external_ids")
+  string statistics are large (up to min: 35B, max: 67B) in 23/23 row groups and untruncated; consider truncating to 64 bytes
+  fix: set file statistics_truncate_length 64
+
+warning oversized-string-statistics
+  --> column[19]("source_payload")
+  string statistics are large (up to min: 221B, max: 46B) in 22/23 row groups and untruncated; consider truncating to 64 bytes
+  fix: set file statistics_truncate_length 64
+
+35 issue(s) found.

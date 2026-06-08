@@ -1,0 +1,52 @@
+rsid	genotype	interpretation	risk_level
+rs429358	TT	No e4 allele at this position (likely e2/e3 or e3/e3)	normal
+rs429358	CT	One e4-associated allele (heterozygous); confirm with rs7412	increased_risk
+rs429358	CC	Two e4-associated alleles (homozygous); confirm with rs7412	high_risk
+rs7412	CC	No e2 allele at this position	normal
+rs7412	CT	One e2 allele (may be protective against Alzheimer's)	normal
+rs7412	TT	Two e2 alleles; associated with type III hyperlipoproteinemia risk	increased_risk
+rs6025	GG	No Factor V Leiden mutation. Normal clotting risk.	normal
+rs6025	AG	Heterozygous carrier of Factor V Leiden. 5-10x increased VTE risk.	increased_risk
+rs6025	AA	Homozygous Factor V Leiden. 50-100x increased VTE risk.	high_risk
+rs1799963	GG	No prothrombin mutation. Normal prothrombin levels.	normal
+rs1799963	AG	Heterozygous carrier of prothrombin G20210A. 2-5x increased VTE risk.	increased_risk
+rs1799963	AA	Homozygous prothrombin G20210A. Significantly elevated VTE risk.	high_risk
+rs1801133	GG	Normal MTHFR activity (wild-type C677).	normal
+rs1801133	AG	One copy of MTHFR C677T. ~65% enzyme activity. Usually no concern.	carrier
+rs1801133	AA	Homozygous MTHFR C677T. ~30% enzyme activity. Elevated homocysteine.	increased_risk
+rs1801133	CT	One copy of MTHFR C677T. ~65% enzyme activity. Usually no concern.	carrier
+rs1801133	TT	Homozygous MTHFR C677T. ~30% enzyme activity. Elevated homocysteine.	increased_risk
+rs1801133	CC	Normal MTHFR activity (wild-type C677).	normal
+rs9939609	TT	No obesity risk alleles. Average weight tendency.	normal
+rs9939609	AT	One obesity risk allele. Slightly increased obesity risk (~1.2 kg).	carrier
+rs9939609	AA	Two obesity risk alleles. ~3 kg higher weight, 1.7x obesity risk.	increased_risk
+rs7903146	CC	No diabetes risk alleles at this locus.	normal
+rs7903146	CT	One T2D risk allele. ~1.4x increased type 2 diabetes risk.	increased_risk
+rs7903146	TT	Two T2D risk alleles. ~2x increased type 2 diabetes risk.	high_risk
+rs1800562	GG	No HFE C282Y mutation. Normal iron metabolism from this locus.	normal
+rs1800562	AG	Heterozygous HFE C282Y carrier. Low penetrance alone; check H63D status.	carrier
+rs1800562	AA	Homozygous HFE C282Y. High risk of hereditary hemochromatosis. Serum ferritin and transferrin saturation monitoring recommended.	high_risk
+rs1799853	CC	Normal CYP2C9 metabolism. Standard warfarin dosing.	normal
+rs1799853	CT	CYP2C9*2 carrier. May need reduced warfarin dose.	increased_risk
+rs1799853	TT	CYP2C9*2 homozygous. Significantly reduced warfarin metabolism.	high_risk
+rs1057910	AA	Normal CYP2C9*3 status. Standard warfarin dosing.	normal
+rs1057910	AC	CYP2C9*3 carrier. May need significantly reduced warfarin dose.	increased_risk
+rs1057910	CC	CYP2C9*3 homozygous. Very poor warfarin metabolism.	high_risk
+rs4244285	GG	Normal CYP2C19 function. Standard clopidogrel activation.	normal
+rs4244285	GA	CYP2C19*2 carrier. Intermediate metabolizer; reduced clopidogrel activation.	increased_risk
+rs4244285	AA	CYP2C19*2 homozygous. Poor metabolizer; clopidogrel largely ineffective. Alternative antiplatelet recommended.	high_risk
+rs4149056	TT	Normal SLCO1B1 function. Standard statin risk.	normal
+rs4149056	TC	SLCO1B1*5 carrier. Increased risk of statin-induced myopathy.	increased_risk
+rs4149056	CC	SLCO1B1*5 homozygous. High risk of statin-induced myopathy.	high_risk
+rs4988235	AA	Lactase persistent. Can digest lactose into adulthood.	normal
+rs4988235	AG	Lactase persistent (A is dominant). Can digest lactose.	normal
+rs4988235	GG	Lactase non-persistent. Likely lactose intolerant.	increased_risk
+rs1815739	CC	Functional ACTN3. Fast-twitch muscle fibers. Sprint/power favored.	normal
+rs1815739	CT	One functional copy. Mixed muscle fiber advantage.	normal
+rs1815739	TT	No ACTN3 in fast-twitch fibers. May favor endurance activities.	normal
+rs671	GG	Normal ALDH2 function. No alcohol flush reaction.	normal
+rs671	AG	Reduced ALDH2 activity. Alcohol flush reaction likely.	increased_risk
+rs671	AA	ALDH2 deficient. Strong alcohol flush. Elevated esophageal cancer risk.	high_risk
+rs4680	GG	Val/Val ('warrior'). Higher COMT activity, better stress tolerance, lower baseline cognition.	normal
+rs4680	AG	Val/Met (intermediate). Balanced COMT activity.	normal
+rs4680	AA	Met/Met ('worrier'). Lower COMT activity, higher cognitive performance, more stress-sensitive.	normal

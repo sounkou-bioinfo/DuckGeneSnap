@@ -1,0 +1,17 @@
+set column is_primary_key dictionary true
+set column source compression uncompressed
+set column build compression uncompressed
+set column is_primary_key compression uncompressed
+set column annotation_id statistics page
+set column source statistics page
+set column source_id statistics page
+set column build statistics page
+set column chrom statistics page
+set column chrom_norm statistics page
+set column pos statistics page
+set column ref statistics page
+set column alt statistics page
+set column variant_key statistics page
+set column variant_key_hex statistics page
+set column is_primary_key statistics page
+set column key_role statistics page

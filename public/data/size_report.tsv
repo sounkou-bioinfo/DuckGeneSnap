@@ -1,0 +1,8 @@
+file	bytes	mib
+duckgenesnap.duckdb	3682304	3.512
+variant_annotations.parquet	6742	0.006
+genotype_interpretations.parquet	3367	0.003
+variant_keys.parquet	3199	0.003
+asset_summary.parquet	477	0
+source_summary.parquet	481	0
+index_summary.parquet	1262	0.001
