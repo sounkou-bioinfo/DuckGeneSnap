@@ -71,16 +71,19 @@
     </div>
 
     <div class="tab-pane fade" id="chip-vcf-tool-pane" role="tabpanel" aria-labelledby="chip-vcf-tool-tab">
-      <h3 class="h6">Why convert chip text to VCF?</h3>
+      <h3 class="h6">23andMe text cleanup and VCF conversion</h3>
       <p class="small text-muted">
-        23andMe-style text files usually carry rsID, chromosome, position, and genotype, but not a full REF/ALT representation.
-        Direct text matching is useful for quick locus checks. For allele-aware interpretation, convert chip data to VCF with the correct genome build, reference FASTA, and chip manifest before using DuckGeneSnap.
+        23andMe-style text files carry rsID, chromosome, position, and genotype, but not a guaranteed REF/ALT representation.
+        DuckHTS <code>duckdb_munge</code> is designed for GWAS summary statistics, not personal genotype calls, but the same reference-harmonization idea applies: compare alleles against the selected reference FASTA, detect swaps/reverse complements when unambiguous, and emit called alternate biallelic SNVs as VCF rows.
       </p>
-      <ul class="small text-muted mb-0">
-        <li>Keep build metadata explicit: GRCh37 and GRCh38 positions are not interchangeable.</li>
-        <li>Use a trusted local converter or pipeline that records REF/ALT and preserves no-calls.</li>
-        <li>Then upload the VCF/BCF here so DuckGeneSnap can filter called alternate genotypes and compute VariantKeys.</li>
+      <ul class="small text-muted mb-3">
+        <li>FASTA alone is enough only for unambiguous single-base SNP rows where the chip alleles identify REF vs ALT.</li>
+        <li>A chip manifest or dbSNP/allele map is still needed for strand-ambiguous A/T or C/G SNPs, indels, multi-allelic probes, and vendor-specific probe encodings.</li>
+        <li>The future local converter should output both a VCF/BCF and a QC report: matched reference, swapped/reverse-complemented, ambiguous, no-call, and skipped rows.</li>
       </ul>
+      <div class="alert alert-info small mb-0">
+        Practical rule: use direct chip-text matching only for quick locus checks. For allele-aware interpretation, convert chip data to VCF/BCF with explicit build, reference FASTA, and manifest/dbSNP allele metadata, then upload the converted file to the main annotation workflow.
+      </div>
     </div>
   </div>
 </div>
