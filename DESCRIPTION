@@ -1,14 +1,14 @@
 Package: DuckGeneSnap
 Type: Project
-Title: Static DuckDB/Rduckhts GeneSnap-Style Browser App
+Title: Static DuckDB-Wasm and DuckHTS Genomic Annotation App
 Version: 0.0.0.9000
 Authors@R: c(
     person("Sounkou", "Toure", role = c("aut", "cre"),
            email = "sounkoutoure@gmail.com")
   )
-Description: Static browser-side genomics application that uses webR, DuckDB,
-    Rduckhts, and Parquet assets to match uploaded genotype or VCF/BCF files
-    against locus-first variant annotations without an application backend.
+Description: Static browser-side genomics application using DuckDB-Wasm,
+    DuckHTS, and Parquet assets to match local genotype and VCF/BCF files
+    against locus-first variant annotations. An R pipeline builds the assets.
 License: MIT + file LICENSE
 URL: https://github.com/sounkou-bioinfo/DuckGeneSnap,
     https://sounkou-bioinfo.github.io/DuckGeneSnap/
@@ -24,4 +24,3 @@ Imports:
     rmarkdown,
     Rduckhts
 Roxygen: list(markdown = TRUE)
-Config/Needs/website: goserveR

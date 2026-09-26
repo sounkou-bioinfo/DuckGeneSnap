@@ -14,7 +14,7 @@ test("indexed FASTA conversion produces VCF and QC locally", { timeout: 90000 },
   await page.locator("#chip-reference-index").setInputFiles(upload("ref.fa.fai", "chr1\t8\t6\t8\t9\n"));
   const downloads = [];
   page.on("download", (item) => downloads.push(item));
-  await page.locator("details summary").click();
+  await page.getByText("Advanced tools").click();
   await page.locator("#chip-convert").click();
   await page.locator("#status").getByText(/Converted 1 of 1/).waitFor();
   assert.equal(downloads.length, 2);
