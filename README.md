@@ -1,194 +1,70 @@
-
 # DuckGeneSnap
 
-DuckGeneSnap is a pure static, browser-side reproduction of the core
-GeneSnap idea: parse personal genotype/variant files, match clinically
-or biologically annotated loci, and present categorized results without
-running a backend.
+DuckGeneSnap is a static, browser-side genomic annotation explorer. It reads
+23andMe-style text and VCF/BCF/VCF.GZ, joins loci against shipped GRCh37 and
+GRCh38 ClinVar/GWAS Parquet assets and curated seed interpretations, and keeps
+queries in DuckDB-Wasm with DuckHTS. It is informational, **not medical advice**;
+clinical findings need clinical-grade confirmation.
 
-It follows the DuckBedQC pattern: the page loads `webR`, `duckdb`, and
-`Rduckhts` in the browser. User files are staged into the browser
-filesystem and queried locally. No genotype data is uploaded to a
-server.
+## Run
 
-> **Disclaimer:** DuckGeneSnap is informational only and is not medical
-> advice. Clinically significant findings require clinical-grade
-> confirmation and review by a qualified professional.
+```sh
+npm ci
+npm run vendor
+npm run stage
+npm run stage:dev
+npm run serve
+# open http://127.0.0.1:8000/?duckhts=dev
+npm test
+```
+
+`vendor/` is never committed. `npm run stage` checks the DuckHTS and Parquet
+Wasm downloads against pinned SHA-256 manifests. `npm run stage:dev` fetches a
+pinned unsigned DuckHTS CI artifact using `gh`; it can also accept an existing
+`gh run download` directory as its argument. The signed DuckHTS 1.5.2 build
+cannot read browser `blob:` inputs. Use `?duckhts=dev` for VCF/BCF, indexed
+FASTA and liftover; the default page rejects local VCF/BCF inputs with an
+explanation. Once `duckhts@dev` is published, the npm package can replace this
+verified CI artifact. The site must be served over HTTP, not opened as `file:`.
+
+The browser downloads static annotations from its own origin; no query or
+upload is sent to a third-party service. A same-origin Service Worker provides
+temporary byte-range access to paired FASTA/.fai and chain uploads needed by
+liftover. These files are cleared from browser Cache Storage after each
+operation; a browser crash can leave them in site storage until site data is
+cleared. Large references require sufficient local storage.
 
 ## Features
 
-DuckGeneSnap accepts 23andMe-style text and VCF/BCF/VCF.GZ files, runs
-all work locally in the browser, and queries shipped Parquet assets with
-DuckDB. The assets include ClinVar variant-summary rows for GRCh37 and
-GRCh38, GWAS Catalog associations on both builds, and a small seed table
-for examples/tests.
+- 23andMe-style chip text (including gzip text), VCF, BCF and VCF.GZ input;
+  GRCh37/GRCh38 selection, called-alternate or all-concrete VCF mode.
+- Locus-first matching, exact VariantKey refinement for annotations with
+  known alleles, genotype interpretation for curated seed rows.
+- Local result counts, search, gene/category/risk/source/classification and
+  ClinVar review-star filters, paging, details, and filtered TSV/CSV/Parquet
+  downloads. No spreadsheet library is needed; Excel is not provided.
+- DuckHTS SQL liftover with uploaded chain and indexed source/destination
+  FASTAs, yielding VCF, TSV or Parquet; chip-to-VCF plus QC TSV using indexed
+  `fasta_nuc` reference reads. Chip conversion emits biallelic SNVs only.
+- Included synthetic examples in `public/demo/`, with headless Chromium tests
+  (`npm test`). The HTML is intentionally unstyled so page design can be
+  supplied separately.
 
-VCF/BCF inputs are filtered to called alternate records and matched by
-exact `variant_key` when REF/ALT alleles are available. Results are
-searchable, paged, and exportable as TSV, CSV, Excel, or Parquet.
-Advanced local tools write lifted VCF/TSV/Parquet and convert
-23andMe-style text to VCF + QC TSV using DuckHTS reference and
-normalization UDFs.
+## Asset pipeline
 
-## Hosted site
+The R asset builder and committed Parquet files remain independent of the web
+runtime. Rebuild with `Rscript scripts/build_assets.R` (requires `optparse`,
+`DBI`, `duckdb`, `Rduckhts`, `jsonlite`). See `docs/ASSET_SCHEMA.md`,
+`docs/ARCHITECTURE.md`, and `docs/SIZE_TESTS.md`.
 
-GitHub Pages is configured for the repository root:
+## Matching contract
 
-<https://sounkou-bioinfo.github.io/DuckGeneSnap/>
+Input and annotation rows first join on `(build, chrom_norm, pos)`. VCF/BCF
+rows then compute `variantkey(chrom,pos,ref,alt)` after optional liftover and
+require exact keys when the annotation has one. Chip text has no reference
+allele, so its results remain locus-only. rsIDs are display metadata, not
+join keys.
 
-## Run locally
-
-Serve the repository over HTTP; do not open `index.html` with `file://`.
-For local testing, prefer goServeR because it supports range requests
-out of the box:
-
-``` bash
-cd DuckGeneSnap
-Rscript -e "goserveR::runServer(dir='.', prefix='/', addr='127.0.0.1:8000')"
-# open http://127.0.0.1:8000/
-```
-
-If needed, install goServeR from
-<https://github.com/sounkou-bioinfo/goServeR>.
-
-First browser use can take a while because webR installs `DBI`,
-`duckdb`, `jsonlite`, and `Rduckhts` into the browser runtime.
-
-## Rebuild static assets
-
-Requires R packages `optparse`, `DBI`, `duckdb`, `Rduckhts`, and
-`jsonlite`.
-
-``` bash
-cd DuckGeneSnap
-Rscript scripts/build_assets.R
-```
-
-Useful size-test examples:
-
-``` bash
-Rscript scripts/build_assets.R \
-  --out-dir .size_tests/clinvar_tsv_noidx \
-  --clinvar-tsv path/to/variant_summary.txt.gz \
-  --skip-seed \
-  --skip-indexes
-
-Rscript scripts/build_assets.R \
-  --out-dir .size_tests/gwas_full \
-  --gwas-zip path/to/gwas-catalog-associations-full.zip \
-  --skip-seed \
-  --skip-indexes
-```
-
-Outputs:
-
-- `public/data/variant_annotations.parquet`
-- `public/data/genotype_interpretations.parquet`
-- `public/data/variant_keys.parquet`
-- `public/data/source_summary.parquet`
-- `public/data/index_summary.parquet`
-- `public/data/size_report.tsv`
-- `public/data/manifest.json`
-
-See `docs/SIZE_TESTS.md` for measured ClinVar/GWAS bundle sizes, index
-overhead, ZSTD compression-level tests, `parquet-linter` output, and
-Parquet row group trade-offs.
-
-## Committed annotation asset sizes
-
-| file                             |     bytes |    mib |
-|:---------------------------------|----------:|-------:|
-| variant_annotations.parquet      | 100356489 | 95.707 |
-| genotype_interpretations.parquet |      3367 |  0.003 |
-| variant_keys.parquet             |  15208692 | 14.504 |
-| asset_summary.parquet            |       483 |  0.000 |
-| source_summary.parquet           |       567 |  0.001 |
-| index_summary.parquet            |      1262 |  0.001 |
-
-## Demo and test inputs
-
-The repository includes small synthetic input files for testing both
-supported input paths and both builds represented in the committed
-assets:
-
-- `public/demo/example_23andme.txt`
-- `public/demo/example_23andme_grch37.txt`
-- `public/demo/example_23andme_grch38.txt`
-- `public/demo/example_grch37.vcf`
-- `public/demo/example_grch37.bcf`
-- `public/demo/example_deepvariant_grch37.vcf.gz`
-- `public/demo/example_grch38.vcf`
-- `public/demo/example_grch38.bcf`
-
-## Repository layout
-
-``` text
-index.html                         static app shell
-src/duckgenesnap.js                browser webR/DuckDB/Rduckhts runtime
-public/data/*.parquet              sorted annotation and metadata assets
-public/demo/*                      synthetic chip/VCF/BCF test inputs
-data/seed/*.tsv                    GRCh37 seed curation source
-scripts/build_assets.R             optparse asset builder/injector
-docs/                              design, schema, size notes
-```
-
-## Matching and storage policy
-
-Core ingestion does **not** depend on rsID identity. Uploaded rows are
-matched by:
-
-``` text
-analysis_build + chrom_norm + pos
-```
-
-`source_id` may contain rsIDs or source-specific identifiers, but it is
-display metadata only. For VCF/BCF uploads, DuckGeneSnap refines locus
-hits with exact `variant_key` allele matching when ClinVar/seed
-annotations have REF/ALT keys, so same-locus different-allele records
-are not reported as hits. For direct 23andMe text uploads, matching
-remains locus-only because chip text lacks a full REF/ALT
-representation.
-
-A browser-side webR REPL is intentionally out of scope for the current
-release, but the app keeps the DuckDB connection in the browser runtime
-so a future REPL panel can expose plotting, ad hoc SQL, and additional
-summary statistics. The displayed result table is already searchable
-through DuckDB, and exports are written from the in-browser
-`analysis_matches` table.
-
-Do not lift or mutate VariantKeys directly. For allele-aware paths:
-
-``` text
-source chrom/pos/ref/alt
-  -> optional normalization/liftover
-  -> recompute variantkey(chrom, pos, ref, alt)
-  -> optional exact-key refinement
-```
-
-## Upstream attribution and frontend query credit
-
-DuckGeneSnap is an independent static-site/DuckDB/Rduckhts
-implementation inspired by the upstream GeneSnap project by syao13:
-<https://github.com/syao13/GeneSnap>. DuckGeneSnap keeps the user-facing
-idea of parsing raw genetic data and annotating clinically significant
-variants, but moves the analysis into a backend-free browser runtime.
-
-The planned variant detail panels also take inspiration from the
-lightweight frontend-only query orchestration in Sasha Gusev’s GWAS
-Lookup: <https://github.com/sashagusev/gwas_lookup>. DuckGeneSnap keeps
-that spirit (client-side modules, URL-stateable variant queries,
-parallel enrichment panels) but uses local DuckDB/Rduckhts assets first
-and calls external APIs only for on-demand detail enrichment.
-
-LitVar2 lookups use the public NCBI/NLM LitVar2 API where browser CORS
-permits it, with direct fallback links to the LitVar2 website. LitVar2
-is an NIH/NLM research tool and is not intended for direct diagnostic
-use or medical decision-making without clinical professional review.
-
-## Related projects
-
-- Upstream GeneSnap: <https://github.com/syao13/GeneSnap>
-- DuckBedQC: <https://github.com/sounkou-bioinfo/DuckBedQC>
-- GWAS Lookup frontend inspiration:
-  <https://github.com/sashagusev/gwas_lookup>
-- Rduckhts / duckhts: <https://github.com/RGenomicsETL/duckhts>
+DuckGeneSnap is an independent browser implementation inspired by GeneSnap
+(<https://github.com/syao13/GeneSnap>); its local SQL architecture follows
+DuckHTS and duckpeakwhere (<https://github.com/sounkou-bioinfo/duckpeakwhere>).

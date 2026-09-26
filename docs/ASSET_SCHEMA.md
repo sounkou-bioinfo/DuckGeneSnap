@@ -56,7 +56,7 @@ Optional genotype-level interpretation rows.
 ## `variant_keys`
 
 Auxiliary allele-specific key table. This is not the primary ingestion identity.
-It is useful for VCF/BCF QA, detail panels, and future allele-exact refinement.
+VCF/BCF matches require an exact VariantKey where this table has keys for an annotation; annotations without keys remain locus-only. Chip-text matches remain locus-only.
 
 | Column | Notes |
 |---|---|
@@ -78,7 +78,7 @@ index choices are auditable instead of hidden in the build script.
 
 ## `source_summary` and `asset_summary`
 
-Small manifest-like summary tables used by the app and by smoke tests.
+Small manifest-like summary tables used by the asset pipeline and smoke tests.
 
 ## Parquet sidecars
 
