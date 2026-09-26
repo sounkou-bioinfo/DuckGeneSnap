@@ -1,224 +1,49 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="author" content="DuckGeneSnap contributors" />
-  <title>DuckGeneSnap</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces&display=swap" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
-  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <style>
-    body { background: #f8fafc; }
-    .brand {
-      font-family: "Fraunces", serif;
-      font-size: clamp(3rem, 8vw, 5.5rem);
-      letter-spacing: -0.07em;
-      color: #1d4ed8;
-    }
-    .hero-card { background: linear-gradient(135deg, #eef2ff, #ecfeff); }
-    .feature-icon { font-size: 2.25rem; color: #1d4ed8; }
-    .timing-list { max-height: 16rem; overflow-y: auto; }
-    .results-scroll { max-height: 70vh; overflow: auto; }
-    .results-scroll thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
-    code { color: #0f172a; }
-    table { font-size: 0.95rem; }
-    .collapse-row:hover { --bs-table-hover-bg: transparent; }
-  </style>
-</head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DuckGeneSnap</title></head>
 <body>
-  <header class="container py-5">
-    <div class="text-center py-4">
-      <h1 class="brand fw-bold mb-3">DuckGeneSnap</h1>
-      <p class="lead mx-auto mb-3" style="max-width: 850px;">
-        A backend-free GeneSnap-style genome snapshot inspired by
-        <a href="https://github.com/syao13/GeneSnap" target="_blank" rel="noopener noreferrer">syao13/GeneSnap</a>:
-        upload 23andMe text or VCF/BCF, join against curated Parquet assets with DuckDB,
-        and use Rduckhts VariantKeys in the browser.
-      </p>
-      <div class="d-flex flex-wrap justify-content-center gap-3 small">
-        <a href="https://github.com/sounkou-bioinfo/DuckGeneSnap" class="link-dark" target="_blank" rel="noopener noreferrer">DuckGeneSnap repo</a>
-        <a href="https://github.com/sounkou-bioinfo/DuckBedQC" class="link-dark" target="_blank" rel="noopener noreferrer">DuckBedQC pattern</a>
-        <a href="https://github.com/syao13/GeneSnap" class="link-dark" target="_blank" rel="noopener noreferrer">GeneSnap inspiration</a>
-        <a href="https://github.com/sashagusev/gwas_lookup" class="link-dark" target="_blank" rel="noopener noreferrer">GWAS Lookup frontend inspiration</a>
-        <a href="https://github.com/RGenomicsETL/duckhts" class="link-dark" target="_blank" rel="noopener noreferrer">Rduckhts / duckhts</a>
-      </div>
-    </div>
-  </header>
-
-  <main class="container pb-5">
-    <section class="card hero-card border-0 shadow-sm mb-4">
-      <div class="card-body p-4 p-lg-5">
-        <div class="row g-4 align-items-start">
-          <div class="col-lg-8">
-            <h2 class="h4 mb-3">Analyze locally</h2>
-            <div id="runtime-status" class="alert alert-secondary mb-3">Preparing page...</div>
-            <div id="messages"></div>
-
-            <div class="mb-3">
-              <label for="file-input" class="form-label fw-semibold">Input file</label>
-              <input class="form-control form-control-lg" type="file" id="file-input" accept=".txt,.tsv,.vcf,.bcf,.gz" />
-              <div class="form-text">
-                Your file is read by your browser and staged into webR's in-memory filesystem. It is not uploaded to a server.
-                VCF/BCF is preferred. For allele-aware chip calls, use Advanced local tools to convert 23andMe-style text to VCF with the matching reference FASTA.
-              </div>
-            </div>
-
-            <div class="row g-3 mb-3">
-              <div class="col-md-4">
-                <label for="input-kind" class="form-label">Input type</label>
-                <select id="input-kind" class="form-select">
-                  <option value="auto">auto-detect</option>
-                  <option value="23andme">23andMe raw text</option>
-                  <option value="vcf_bcf">VCF / BCF</option>
-                </select>
-              </div>
-              <div class="col-md-4">
-                <label for="input-build" class="form-label">Input build</label>
-                <select id="input-build" class="form-select">
-                  <option value="GRCh37">GRCh37</option>
-                </select>
-              </div>
-              <div class="col-md-4">
-                <label for="analysis-build" class="form-label">Analysis build</label>
-                <select id="analysis-build" class="form-select">
-                  <option value="GRCh37">GRCh37</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="row g-3 align-items-end">
-              <div class="col-md-4">
-                <label for="vcf-record-filter" class="form-label">VCF/gVCF record filter</label>
-                <select id="vcf-record-filter" class="form-select">
-                  <option value="called_alt" selected>called alternate variants only</option>
-                  <option value="all_concrete">all concrete REF/ALT records</option>
-                </select>
-              </div>
-              <div class="col-md-8 d-flex flex-wrap gap-2">
-                <button id="analyze-button" type="button" class="btn btn-primary btn-lg">Analyze locally</button>
-                <button id="demo-button" type="button" class="btn btn-outline-dark btn-lg">Load demo 23andMe</button>
-                <button id="reset-button" type="button" class="btn btn-outline-secondary btn-lg">Reset</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="col-lg-4">
-            <div class="card border-0 shadow-sm mb-3">
-              <div class="card-body">
-                <h3 class="h6 text-uppercase text-muted">Asset bundle</h3>
-                <div id="asset-status" class="small text-muted">Loading manifest...</div>
-                <hr />
-                <p class="small mb-0">
-                  Static assets are locus-first: <code>build + chrom + pos</code>.
-                  <code>variant_keys.parquet</code> is auxiliary for allele-aware display,
-                  QA, and future exact-key refinement.
-                </p>
-              </div>
-            </div>
-            <div class="card border-0 shadow-sm mb-3" id="timing-card" hidden>
-              <div class="card-body">
-                <h3 class="h6 text-uppercase text-muted">Run steps</h3>
-                <div id="timing-list" class="timing-list small text-muted">
-                  Step timings appear here after analysis starts.
-                </div>
-              </div>
-            </div>
-            <div class="card border-warning bg-warning-subtle">
-              <div class="card-body small">
-                <strong>Not medical advice.</strong> This site is informational only and uses static annotation snapshots.
-                Clinically significant results should be confirmed with clinical-grade testing and reviewed with a qualified professional.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <section class="card mt-4" id="advanced-tools">
-          <div class="card-header bg-white d-flex justify-content-between align-items-center gap-2">
-            <div>
-              <h2 class="h5 mb-0">Advanced local tools</h2>
-              <div class="small text-muted">Optional VCF liftover and chip-to-VCF conversion.</div>
-            </div>
-            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#advanced-tools-body" aria-expanded="false" aria-controls="advanced-tools-body">
-              Show tools
-            </button>
-          </div>
-          <div class="collapse" id="advanced-tools-body" hx-get="public/fragments/advanced_tools.html" hx-trigger="load" hx-swap="innerHTML">
-            <div class="card-body text-muted small">Loading advanced local tools...</div>
-          </div>
-        </section>
-      </div>
-    </section>
-
-    <section class="row g-4 mb-4">
-      <div class="col-md-4">
-        <div class="card h-100 border-0 shadow-sm">
-          <div class="card-body">
-            <i class="bi bi-shield-lock feature-icon"></i>
-            <h3 class="h5 mt-3">Private by construction</h3>
-            <p class="mb-0">webR, DuckDB, and Rduckhts run inside the page; uploaded genotype data is not sent to an upload endpoint.</p>
-          </div>
-        </div>
-      </div>
-      <div class="col-md-4">
-        <div class="card h-100 border-0 shadow-sm">
-          <div class="card-body">
-            <i class="bi bi-key feature-icon"></i>
-            <h3 class="h5 mt-3">VariantKey-first joins</h3>
-            <p class="mb-0">Uploads are matched by genome build, normalized chromosome, and 1-based position using DuckDB indexes or Parquet row-group statistics.</p>
-          </div>
-        </div>
-      </div>
-      <div class="col-md-4">
-        <div class="card h-100 border-0 shadow-sm">
-          <div class="card-body">
-            <i class="bi bi-diagram-3 feature-icon"></i>
-            <h3 class="h5 mt-3">Schema-ready liftover</h3>
-            <p class="mb-0">When strict coordinate conversion is needed, recompute VariantKeys after Rduckhts liftover rather than lifting keys themselves.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="results"></section>
-
-    <aside class="mt-5" hx-get="public/fragments/disclaimer.html" hx-trigger="load" hx-swap="innerHTML">
-      <noscript>Enable JavaScript to load the full disclaimer.</noscript>
-    </aside>
-  </main>
-
-  <div class="modal" id="operation-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-body p-4">
-          <div class="d-flex align-items-start">
-            <div class="spinner-border text-dark me-3 mt-1" role="status" id="operation-modal-spinner">
-              <span class="visually-hidden">Working...</span>
-            </div>
-            <div class="flex-grow-1">
-              <h5 class="mb-1" id="operation-modal-title">Working...</h5>
-              <p class="text-muted mb-3" id="operation-modal-detail">Preparing browser task.</p>
-              <div class="d-flex justify-content-between small">
-                <span id="operation-modal-state">Running</span>
-                <span id="operation-modal-elapsed">0 ms</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <footer class="container py-4 text-muted small">
-    <div class="d-flex flex-wrap justify-content-between gap-2">
-      <span>DuckGeneSnap: static DuckDB/Rduckhts genomics demo.</span>
-      <span>Inspired by DuckBedQC and upstream <a href="https://github.com/syao13/GeneSnap" class="link-secondary" target="_blank" rel="noopener noreferrer">GeneSnap</a>.</span>
-    </div>
-  </footer>
-
-  <script type="module" src="src/duckgenesnap.js"></script>
-</body>
-</html>
+<header><h1>DuckGeneSnap</h1><p>Local genomic annotation exploration. Not medical advice; confirm findings with clinical-grade testing.</p></header>
+<main>
+  <p id="status" role="status">Starting DuckDB…</p>
+  <form id="analysis-form">
+    <fieldset><legend>Input</legend>
+      <label for="input-file">23andMe text, VCF, VCF.GZ, or BCF</label><input id="input-file" type="file" accept=".txt,.tsv,.vcf,.vcf.gz,.bcf">
+      <label for="input-build">Input build</label><select id="input-build"><option>GRCh37</option><option>GRCh38</option></select>
+      <label for="analysis-build">Annotation build</label><select id="analysis-build"><option>GRCh37</option><option>GRCh38</option></select>
+      <label for="record-filter">VCF records</label><select id="record-filter"><option value="called_alt">Called alternate alleles</option><option value="all_concrete">All concrete alleles</option></select>
+      <button id="analyze-button" type="submit">Analyze locally</button><button id="demo-button" type="button">Load demo</button>
+    </fieldset>
+  </form>
+  <details><summary>Advanced tools</summary>
+    <fieldset><legend>VCF liftover</legend>
+      <p>Supply a chain and source/destination FASTA files with indexes for build conversion. Indexed files are staged temporarily in this browser's origin and removed after the operation.</p>
+      <label for="lift-file">Input VCF/BCF</label><input id="lift-file" type="file" accept=".vcf,.vcf.gz,.bcf">
+      <label for="chain-file">Chain</label><input id="chain-file" type="file">
+      <label for="source-fasta">Source FASTA</label><input id="source-fasta" type="file">
+      <label for="source-fai">Source FASTA index</label><input id="source-fai" type="file">
+      <label for="destination-fasta">Destination FASTA</label><input id="destination-fasta" type="file">
+      <label for="destination-fai">Destination FASTA index</label><input id="destination-fai" type="file">
+      <label for="lift-format">Output format</label><select id="lift-format"><option value="vcf">VCF</option><option value="tsv">TSV</option><option value="parquet">Parquet</option></select>
+      <button id="lift-button" type="button">Download lifted variants</button>
+    </fieldset>
+    <fieldset><legend>23andMe to VCF</legend>
+      <label for="chip-reference">Reference FASTA</label><input id="chip-reference" type="file">
+      <label for="chip-reference-index">Reference FASTA index</label><input id="chip-reference-index" type="file">
+      <label for="chip-sample">Sample ID</label><input id="chip-sample" value="SAMPLE">
+      <label for="chip-hom-alt">Emit homozygous non-reference calls</label><input id="chip-hom-alt" type="checkbox" checked>
+      <button id="chip-convert" type="button">Download VCF and QC TSV</button>
+    </fieldset>
+  </details>
+  <section aria-label="Results"><h2>Matches</h2><p id="summary"></p>
+    <label for="search">Search results</label><input id="search" type="search">
+    <label for="gene">Gene</label><input id="gene" type="search">
+    <label for="significance">Significance</label><select id="significance"><option value="">All classifications</option></select>
+    <label for="min-stars">Minimum ClinVar review stars</label><select id="min-stars"><option value="">Any</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
+    <label for="category">Category</label><select id="category"><option value="">All categories</option></select>
+    <label for="risk_level">Risk level</label><select id="risk_level"><option value="">All risks</option></select>
+    <label for="source">Source</label><select id="source"><option value="">All sources</option></select>
+    <button id="previous" type="button">Previous</button><span id="page-number"></span><button id="next" type="button">Next</button>
+    <table id="results"><thead><tr><th>Gene</th><th>Annotation</th><th>Category</th><th>Risk</th><th>Genotype</th><th>Source</th><th>Interpretation</th><th>Details</th></tr></thead><tbody></tbody></table>
+    <label for="export-format">Export</label><select id="export-format"><option value="tsv">TSV</option><option value="csv">CSV</option><option value="parquet">Parquet</option></select>
+    <button id="download-button" type="button">Download filtered matches</button>
+  </section>
+</main><script type="module" src="/src/app.js"></script></body></html>
