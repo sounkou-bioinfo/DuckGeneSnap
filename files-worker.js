@@ -4,7 +4,8 @@ const name = "duckgenesnap-local-input-v1";
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", (event) => {
-  if (!new URL(event.request.url).pathname.startsWith("/local-input/")) return;
+  const prefix = new URL("local-input/", self.registration.scope).pathname;
+  if (!new URL(event.request.url).pathname.startsWith(prefix)) return;
   event.respondWith((async () => {
     const cache = await caches.open(name);
     const saved = await cache.match(event.request.url);

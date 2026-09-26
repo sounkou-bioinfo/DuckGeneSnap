@@ -7,8 +7,10 @@ export const rows = (table) => table.toArray().map((row) => Object.fromEntries(
 
 export async function openDatabase({ dev = false } = {}) {
   const bundles = {
-    mvp: { mainModule: "/vendor/duckdb/duckdb-mvp.wasm", mainWorker: "/vendor/duckdb/duckdb-browser-mvp.worker.js" },
-    eh: { mainModule: "/vendor/duckdb/duckdb-eh.wasm", mainWorker: "/vendor/duckdb/duckdb-browser-eh.worker.js" },
+    mvp: { mainModule: new URL("../vendor/duckdb/duckdb-mvp.wasm", import.meta.url).href,
+      mainWorker: new URL("../vendor/duckdb/duckdb-browser-mvp.worker.js", import.meta.url).href },
+    eh: { mainModule: new URL("../vendor/duckdb/duckdb-eh.wasm", import.meta.url).href,
+      mainWorker: new URL("../vendor/duckdb/duckdb-browser-eh.worker.js", import.meta.url).href },
   };
   const bundle = await duckdb.selectBundle(bundles);
   const worker = new Worker(bundle.mainWorker);
@@ -30,7 +32,7 @@ export async function openDatabase({ dev = false } = {}) {
 
 export async function loadAssets(db, conn) {
   for (const name of ["variant_annotations", "genotype_interpretations", "variant_keys"]) {
-    const url = `/public/data/${name}.parquet`;
+    const url = new URL(`../public/data/${name}.parquet`, import.meta.url).href;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Failed to load ${url}`);
     await db.registerFileBuffer(`${name}.parquet`, new Uint8Array(await response.arrayBuffer()));

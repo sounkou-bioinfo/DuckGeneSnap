@@ -2,8 +2,8 @@
 import { chromium } from "playwright-core";
 import { serve } from "../scripts/serve.mjs";
 
-export async function openBrowser() {
-  const server = await serve(new URL("..", import.meta.url).pathname, 0);
+export async function openBrowser(root = new URL("..", import.meta.url).pathname) {
+  const server = await serve(root, 0);
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ args: ["--no-sandbox"] });
   const requests = [];

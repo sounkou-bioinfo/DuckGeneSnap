@@ -21,7 +21,7 @@ async function boot() {
   backend = await openDatabase({ dev });
   ready = await supportsLocalFiles(backend.conn);
   await loadAssets(backend.db, backend.conn);
-  const manifest = await (await fetch("/public/data/manifest.json")).json();
+  const manifest = await (await fetch(new URL("../public/data/manifest.json", import.meta.url))).json();
   status(`Ready: ${manifest.counts?.variant_annotations ?? "?"} annotations. ${ready ? "Local VCF reading available." : "Local VCF reading requires ?duckhts=dev and npm run stage:dev."}`);
   el("analyze-button").disabled = false;
   el("demo-button").disabled = false;
@@ -106,7 +106,7 @@ el("analysis-form").addEventListener("submit", (event) => {
   });
 });
 el("demo-button").addEventListener("click", () => run(async () => {
-  const response = await fetch("/public/demo/example_23andme_grch37.txt");
+  const response = await fetch(new URL("../public/demo/example_23andme_grch37.txt", import.meta.url));
   fileForDemo = new File([await response.blob()], "example_23andme_grch37.txt");
   el("input-build").value = "GRCh37"; el("analysis-build").value = "GRCh37";
   await analyze(fileForDemo);
