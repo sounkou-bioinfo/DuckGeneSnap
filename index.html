@@ -1,50 +1,69 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DuckGeneSnap</title></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DuckGeneSnap</title>
+<link rel="stylesheet" href="./src/style.css"></head>
 <body>
-<header><h1>DuckGeneSnap</h1><p>Local genomic annotation exploration. Not medical advice; confirm findings with clinical-grade testing.</p></header>
-<main>
-  <details><summary>Medical and technical limitations</summary><p>Consumer SNP arrays assay a limited part of the genome and may contain erroneous rare calls. This site is informational, not a diagnostic device. Confirm clinically significant findings with clinical-grade testing. The shipped annotation set is limited.</p></details>
+<header>
+  <h1>DuckGeneSnap</h1>
+  <p class="lede">Annotate a consumer genotype file or VCF against ClinVar and GWAS, in your browser. Nothing leaves this page. Informational only, <a href="#limitations">not medical advice</a>.</p>
   <p id="status" role="status">Starting DuckDB…</p>
-  <form id="analysis-form">
+</header>
+<main>
+  <form id="analysis-form" class="panel">
     <fieldset><legend>Input</legend>
-      <label for="input-file">23andMe text, VCF, VCF.GZ, or BCF</label><input id="input-file" type="file" accept=".txt,.tsv,.vcf,.vcf.gz,.bcf">
-      <label for="input-build">Input build</label><select id="input-build"><option>GRCh37</option><option>GRCh38</option></select>
-      <label for="analysis-build">Annotation build</label><select id="analysis-build"><option>GRCh37</option><option>GRCh38</option></select>
-      <label for="record-filter">VCF records</label><select id="record-filter"><option value="called_alt">Called alternate alleles</option><option value="all_concrete">All concrete alleles</option></select>
-      <button id="analyze-button" type="submit">Analyze locally</button><button id="demo-button" type="button">Load demo</button>
+      <div class="field wide"><label for="input-file">23andMe text, VCF, VCF.GZ or BCF</label><input id="input-file" type="file" accept=".txt,.tsv,.vcf,.vcf.gz,.bcf"></div>
+      <div class="field"><label for="input-build">Input build</label><select id="input-build"><option>GRCh37</option><option>GRCh38</option></select></div>
+      <div class="field"><label for="analysis-build">Annotation build</label><select id="analysis-build"><option>GRCh37</option><option>GRCh38</option></select></div>
+      <div class="field"><label for="record-filter">VCF records</label><select id="record-filter"><option value="called_alt">Called alternate alleles</option><option value="all_concrete">All concrete alleles</option></select></div>
+      <div class="actions"><button id="analyze-button" type="submit" class="primary">Analyze locally</button><button id="demo-button" type="button">Load demo</button></div>
     </fieldset>
   </form>
-  <details><summary>Advanced tools</summary>
+
+  <details class="panel"><summary>Advanced tools</summary>
     <fieldset><legend>VCF liftover</legend>
-      <p>Supply a chain and source/destination FASTA files with indexes for build conversion. Indexed files are staged temporarily in this browser's origin and removed after the operation.</p>
-      <label for="lift-file">Input VCF/BCF</label><input id="lift-file" type="file" accept=".vcf,.vcf.gz,.bcf">
-      <label for="chain-file">Chain</label><input id="chain-file" type="file">
-      <label for="source-fasta">Source FASTA</label><input id="source-fasta" type="file">
-      <label for="source-fai">Source FASTA index</label><input id="source-fai" type="file">
-      <label for="destination-fasta">Destination FASTA</label><input id="destination-fasta" type="file">
-      <label for="destination-fai">Destination FASTA index</label><input id="destination-fai" type="file">
-      <label for="lift-format">Output format</label><select id="lift-format"><option value="vcf">VCF</option><option value="tsv">TSV</option><option value="parquet">Parquet</option></select>
-      <button id="lift-button" type="button">Download lifted variants</button>
+      <p class="note">A chain plus source and destination FASTA files with their indexes. Indexed files are staged in this browser's storage and removed after the operation.</p>
+      <div class="field wide"><label for="lift-file">Input VCF/BCF</label><input id="lift-file" type="file" accept=".vcf,.vcf.gz,.bcf"></div>
+      <div class="field"><label for="chain-file">Chain</label><input id="chain-file" type="file"></div>
+      <div class="field"><label for="source-fasta">Source FASTA</label><input id="source-fasta" type="file"></div>
+      <div class="field"><label for="source-fai">Source FASTA index</label><input id="source-fai" type="file"></div>
+      <div class="field"><label for="destination-fasta">Destination FASTA</label><input id="destination-fasta" type="file"></div>
+      <div class="field"><label for="destination-fai">Destination FASTA index</label><input id="destination-fai" type="file"></div>
+      <div class="field"><label for="lift-format">Output format</label><select id="lift-format"><option value="vcf">VCF</option><option value="tsv">TSV</option><option value="parquet">Parquet</option></select></div>
+      <div class="actions"><button id="lift-button" type="button">Download lifted variants</button></div>
     </fieldset>
     <fieldset><legend>23andMe to VCF</legend>
-      <label for="chip-reference">Reference FASTA</label><input id="chip-reference" type="file">
-      <label for="chip-reference-index">Reference FASTA index</label><input id="chip-reference-index" type="file">
-      <label for="chip-sample">Sample ID</label><input id="chip-sample" value="SAMPLE">
-      <label for="chip-hom-alt">Emit homozygous non-reference calls</label><input id="chip-hom-alt" type="checkbox" checked>
-      <button id="chip-convert" type="button">Download VCF and QC TSV</button>
+      <p class="note">Uses the file chosen under Input.</p>
+      <div class="field"><label for="chip-reference">Reference FASTA</label><input id="chip-reference" type="file"></div>
+      <div class="field"><label for="chip-reference-index">Reference FASTA index</label><input id="chip-reference-index" type="file"></div>
+      <div class="field"><label for="chip-sample">Sample ID</label><input id="chip-sample" value="SAMPLE"></div>
+      <div class="field check"><input id="chip-hom-alt" type="checkbox" checked><label for="chip-hom-alt">Emit homozygous non-reference calls</label></div>
+      <div class="actions"><button id="chip-convert" type="button">Download VCF and QC TSV</button></div>
     </fieldset>
   </details>
-  <section aria-label="Results"><h2>Matches</h2><p id="summary"></p>
-    <label for="search">Search results</label><input id="search" type="search">
-    <label for="gene">Gene</label><input id="gene" type="search">
-    <label for="significance">Significance</label><select id="significance"><option value="">All classifications</option></select>
-    <label for="min-stars">Minimum ClinVar review stars</label><select id="min-stars"><option value="">Any</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
-    <label for="category">Category</label><select id="category"><option value="">All categories</option></select>
-    <label for="risk_level">Risk level</label><select id="risk_level"><option value="">All risks</option></select>
-    <label for="source">Source</label><select id="source"><option value="">All sources</option></select>
-    <button id="previous" type="button">Previous</button><span id="page-number"></span><button id="next" type="button">Next</button>
-    <table id="results"><thead><tr><th>Gene</th><th>Annotation</th><th>Category</th><th>Risk</th><th>Genotype</th><th>Source</th><th>Interpretation</th><th>Details</th></tr></thead><tbody></tbody></table>
-    <label for="export-format">Export</label><select id="export-format"><option value="tsv">TSV</option><option value="csv">CSV</option><option value="parquet">Parquet</option></select>
-    <button id="download-button" type="button">Download filtered matches</button>
+
+  <section aria-label="Results" class="panel results">
+    <h2>Matches</h2>
+    <p id="summary"></p>
+    <div class="filters">
+      <div class="field wide"><label for="search">Search</label><input id="search" type="search" placeholder="rsID, variant or text"></div>
+      <div class="field"><label for="gene">Gene</label><input id="gene" type="search"></div>
+      <div class="field"><label for="significance">Significance</label><select id="significance"><option value="">All classifications</option></select></div>
+      <div class="field"><label for="min-stars">ClinVar review stars</label><select id="min-stars"><option value="">Any</option><option value="0">≥ 0</option><option value="1">≥ 1</option><option value="2">≥ 2</option><option value="3">≥ 3</option><option value="4">4</option></select></div>
+      <div class="field"><label for="category">Category</label><select id="category"><option value="">All categories</option></select></div>
+      <div class="field"><label for="risk_level">Risk level</label><select id="risk_level"><option value="">All risks</option></select></div>
+      <div class="field"><label for="source">Source</label><select id="source"><option value="">All sources</option></select></div>
+    </div>
+    <div class="table-wrap">
+      <table id="results"><thead><tr><th>Gene</th><th>Annotation</th><th>Category</th><th>Risk</th><th>Genotype</th><th>Source</th><th>Interpretation</th><th>Details</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="pager">
+      <button id="previous" type="button">Previous</button><span id="page-number"></span><button id="next" type="button">Next</button>
+      <span class="spacer"></span>
+      <label for="export-format">Export</label><select id="export-format"><option value="tsv">TSV</option><option value="csv">CSV</option><option value="parquet">Parquet</option></select>
+      <button id="download-button" type="button">Download filtered matches</button>
+    </div>
   </section>
-</main><script type="module" src="./src/app.js"></script></body></html>
+
+  <details id="limitations" class="panel disclaimer"><summary>Medical and technical limitations</summary><p>Consumer SNP arrays assay a small part of the genome and can contain erroneous rare calls. This page is informational, not a diagnostic device, and the shipped annotation set is limited. Confirm any clinically significant finding with clinical-grade testing.</p></details>
+</main>
+<footer><p>DuckDB-Wasm and DuckHTS, running locally. <a href="https://github.com/RGenomicsETL/DuckGeneSnap">Source</a></p></footer>
+<script type="module" src="./src/app.js"></script></body></html>

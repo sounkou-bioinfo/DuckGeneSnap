@@ -7,6 +7,7 @@ import { stagePairedFiles } from "./local-files.js";
 import { liftVariants } from "./liftover.js";
 import { supportsLocalFiles } from "../vendor/duckhts-loader.js";
 
+const ALL_LABELS = { category: "All categories", risk_level: "All risk levels", source: "All sources", significance: "All classifications" };
 const el = (id) => document.getElementById(id);
 const status = (text) => { el("status").textContent = text; };
 let backend, ready, resultCount = 0, offset = 0, fileForDemo = null;
@@ -46,16 +47,29 @@ async function showPage() {
   for (const row of page.rows) {
     const tr = document.createElement("tr");
     for (const key of ["gene", "name", "category", "risk_level", "input_genotype", "source", "interpretation"]) {
-      const td = document.createElement("td"); td.textContent = String(row[key] ?? ""); tr.append(td);
+      const td = document.createElement("td"); td.textContent = String(row[key] ?? "");
+      if (key === "risk_level" && row[key]) td.dataset.risk = row[key];
+      tr.append(td);
     }
-    const detail = document.createElement("td");
-    const expand = document.createElement("details"), summary = document.createElement("summary");
-    summary.textContent = "Annotation details";
-    expand.append(summary);
+    const list = document.createElement("dl");
     for (const key of ["annotation_id", "source_id", "build", "input_chrom", "input_pos", "variant_key_hex", "significance", "clinvar_stars", "score", "odds_ratio", "description", "publications", "external_ids"]) {
-      const line = document.createElement("p"); line.textContent = `${key}: ${row[key] ?? ""}`; expand.append(line);
+      if (row[key] == null || row[key] === "") continue;
+      const term = document.createElement("dt"), value = document.createElement("dd");
+      const pair = document.createElement("div");
+      term.textContent = key; value.textContent = String(row[key]); pair.append(term, value); list.append(pair);
     }
-    detail.append(expand); tr.append(detail); tbody.append(tr);
+    const detailRow = document.createElement("tr"), detailCell = document.createElement("td");
+    detailRow.className = "detail"; detailRow.hidden = true;
+    detailCell.colSpan = 8; detailCell.append(list); detailRow.append(detailCell);
+    const toggle = document.createElement("button");
+    toggle.type = "button"; toggle.className = "link"; toggle.textContent = "Details";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => {
+      detailRow.hidden = !detailRow.hidden;
+      toggle.setAttribute("aria-expanded", String(!detailRow.hidden));
+    });
+    const detail = document.createElement("td"); detail.append(toggle);
+    tr.append(detail); tbody.append(tr, detailRow);
   }
   el("page-number").textContent = `${page.total ? offset + 1 : 0}–${Math.min(offset + 25, page.total)} of ${page.total}`;
   el("previous").disabled = offset === 0;
@@ -65,7 +79,7 @@ async function showPage() {
 async function populateFilters() {
   for (const key of ["category", "risk_level", "source", "significance"]) {
     const options = rows(await backend.conn.query(`SELECT DISTINCT ${key} AS value FROM analysis_matches WHERE ${key} IS NOT NULL ORDER BY value`));
-    el(key).replaceChildren(new Option(`All ${key.replace("_", " ")}`, ""), ...options.map(({ value }) => new Option(value, value)));
+    el(key).replaceChildren(new Option(ALL_LABELS[key], ""), ...options.map(({ value }) => new Option(value, value)));
   }
 }
 
@@ -90,7 +104,7 @@ async function analyze(file) {
     count(*) FILTER (WHERE category = 'pharmacogenomics') AS pharmacogenomics,
     count(*) FILTER (WHERE category = 'trait') AS trait,
     count(*) FILTER (WHERE risk_level = 'high_risk') AS high_risk FROM analysis_matches`))[0];
-  el("summary").textContent = `${resultCount} matches; ${counts.health_risk} health risks, ${counts.pharmacogenomics} pharmacogenomics, ${counts.trait} traits, ${counts.high_risk} high risk. Input: ${JSON.stringify(stats)}. Locus matches are exploratory, not clinical diagnoses.`;
+  el("summary").textContent = `${resultCount} matches; ${counts.health_risk} health risks, ${counts.pharmacogenomics} pharmacogenomics, ${counts.trait} traits, ${counts.high_risk} high risk. Input: ${Object.entries(stats).map(([key, value]) => `${value} ${key.replaceAll("_", " ")}`).join(", ")}. Locus matches are exploratory, not clinical diagnoses.`;
   status("Analysis complete.");
 }
 
