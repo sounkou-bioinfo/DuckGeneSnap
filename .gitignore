@@ -3,6 +3,9 @@
 .size_tests/
 .tmp/
 tmp/
+.pi/
+node_modules/
+vendor/
 
 # R session/editor state
 .Rproj.user/

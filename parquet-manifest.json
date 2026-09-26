@@ -1,0 +1,7 @@
+{
+  "source": "https://extensions.duckdb.org/v1.5.4/{platform}/parquet.duckdb_extension.wasm",
+  "files": {
+    "wasm_mvp": "b64c255a7f7d06cc234535b2f0ecab345fda91bffff5509d3179004bc13aa19a",
+    "wasm_eh": "4845705bbd69fc9ad52878d96a505c73cae4a6c509822079cc2413e5eb437f95"
+  }
+}

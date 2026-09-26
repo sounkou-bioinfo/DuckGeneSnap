@@ -1,0 +1,19 @@
+{
+  "name": "duckgenesnap",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "stage": "node scripts/stage-duckhts.mjs && node scripts/stage-parquet.mjs",
+    "stage:dev": "node scripts/stage-duckhts-dev.mjs",
+    "serve": "node scripts/serve.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev57.0",
+    "esbuild": "0.25.12",
+    "playwright-core": "1.60.0"
+  },
+  "engines": {"node": ">=22"}
+}
